@@ -1,5 +1,15 @@
 "use strict";
 
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker
+      .register("./sw.js")
+      .catch((error) => {
+        console.error("Service worker registration failed:", error);
+      });
+  });
+}
+
 const STORAGE_KEY = "weeklyHoursTracker:v1";
 const DEFAULT_THRESHOLD = 40;
 const VALID_TABS = ["log", "summary", "people", "settings"];
