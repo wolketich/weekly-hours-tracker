@@ -1,4 +1,4 @@
-const CACHE_NAME = "weekly-hours-tracker-v2";
+const CACHE_NAME = "weekly-hours-tracker-v3";
 const APP_SHELL = [
   "./",
   "./index.html",

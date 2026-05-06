@@ -4,6 +4,7 @@ const STORAGE_KEY = "weeklyHoursTracker:v1";
 const DEFAULT_THRESHOLD = 40;
 const VALID_TABS = ["today", "week", "people", "settings"];
 const VALID_DAILY_FILTERS = ["all", "missing", "entered"];
+const DEFAULT_NOTE_TEMPLATES = ["Rain delay", "Left early"];
 
 const DAYS = [
   { key: "monday", label: "Monday", short: "Mon" },
@@ -55,6 +56,7 @@ let dailySearchQuery = "";
 let saveTimer = null;
 let noticeTimer = null;
 let focusPersonId = null;
+const collapsedGroupKeys = new Set();
 
 const openNotes = new Set();
 const quickFill = {
@@ -114,6 +116,8 @@ function cacheElements() {
   els.dailyDateLabel = document.getElementById("dailyDateLabel");
   els.dailyDayButtons = document.getElementById("dailyDayButtons");
   els.dailyProgress = document.getElementById("dailyProgress");
+  els.dailyReviewStatus = document.getElementById("dailyReviewStatus");
+  els.dailySignOff = document.getElementById("dailySignOff");
   els.dailyAllCustom = document.getElementById("dailyAllCustom");
   els.dailyApplyCustom = document.getElementById("dailyApplyCustom");
   els.dailyCopyYesterday = document.getElementById("dailyCopyYesterday");
@@ -149,19 +153,27 @@ function cacheElements() {
   els.employeeTotalsMeta = document.getElementById("employeeTotalsMeta");
   els.warningSummary = document.getElementById("warningSummary");
   els.warningsMeta = document.getElementById("warningsMeta");
+  els.overtimeMeta = document.getElementById("overtimeMeta");
+  els.overtimeReview = document.getElementById("overtimeReview");
   els.addEmployeeForm = document.getElementById("addEmployeeForm");
   els.employeeName = document.getElementById("employeeName");
   els.employeeGroup = document.getElementById("employeeGroup");
+  els.employeeGroupOptions = document.getElementById("employeeGroupOptions");
+  els.employeeGroupChoices = document.getElementById("employeeGroupChoices");
   els.employeeRole = document.getElementById("employeeRole");
   els.employeeDialog = document.getElementById("employeeDialog");
   els.employeeDialogForm = document.getElementById("employeeDialogForm");
   els.modalEmployeeName = document.getElementById("modalEmployeeName");
   els.modalEmployeeGroup = document.getElementById("modalEmployeeGroup");
+  els.modalEmployeeGroupChoices = document.getElementById("modalEmployeeGroupChoices");
   els.modalEmployeeRole = document.getElementById("modalEmployeeRole");
   els.employeeDialogClose = document.getElementById("employeeDialogClose");
   els.employeeDialogCancel = document.getElementById("employeeDialogCancel");
   els.peopleList = document.getElementById("peopleList");
   els.thresholdInput = document.getElementById("thresholdInput");
+  els.noteTemplateInput = document.getElementById("noteTemplateInput");
+  els.addNoteTemplate = document.getElementById("addNoteTemplate");
+  els.noteTemplateList = document.getElementById("noteTemplateList");
   els.clearWeek = document.getElementById("clearWeek");
   els.clearAllData = document.getElementById("clearAllData");
   els.exportBackup = document.getElementById("exportBackup");
@@ -196,7 +208,10 @@ function bindEvents() {
     applyDailyHoursToEveryone(Number(dailyAllButton.dataset.dailyAll));
   });
 
+  document.addEventListener("click", handleGroupChoiceClick);
+
   els.dailyDayButtons.addEventListener("click", handleDailyDayClick);
+  els.dailySignOff.addEventListener("click", toggleDailySignOff);
   els.dailyAllCustom.addEventListener("keydown", blockInvalidNumberKeys);
   els.dailyAllCustom.addEventListener("input", () => {
     if (els.dailyAllCustom.value.startsWith("-")) {
@@ -265,9 +280,18 @@ function bindEvents() {
   });
   els.peopleList.addEventListener("input", handlePeopleInput);
   els.peopleList.addEventListener("click", handlePeopleClick);
+  els.peopleList.addEventListener("toggle", handlePeopleToggle, true);
 
   els.thresholdInput.addEventListener("keydown", blockInvalidNumberKeys);
   els.thresholdInput.addEventListener("input", handleThresholdInput);
+  els.addNoteTemplate.addEventListener("click", addNoteTemplateFromSettings);
+  els.noteTemplateInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      addNoteTemplateFromSettings();
+    }
+  });
+  els.noteTemplateList.addEventListener("click", handleNoteTemplateSettingsClick);
 
   els.clearWeek.addEventListener("click", clearSelectedWeek);
   els.clearAllData.addEventListener("click", clearAllData);
@@ -288,6 +312,7 @@ function renderApp() {
   keepUiStateValid();
   updateActiveView();
   updateWeekLabels();
+  renderGroupOptions();
   renderDailyLog();
   renderQuickFill();
   renderBulkFill();
@@ -299,23 +324,24 @@ function renderApp() {
 }
 
 function keepUiStateValid() {
-  if (!state.employees.some((employee) => employee.id === expandedEmployeeId)) {
+  const activeEmployees = getActiveEmployees();
+  if (!activeEmployees.some((employee) => employee.id === expandedEmployeeId)) {
     expandedEmployeeId = null;
   }
-  if (!state.employees.some((employee) => employee.id === expandedDailyEmployeeId)) {
+  if (!activeEmployees.some((employee) => employee.id === expandedDailyEmployeeId)) {
     expandedDailyEmployeeId = null;
   }
   if (!isDayKey(selectedDailyDayKey)) {
     selectedDailyDayKey = getDefaultDailyDayKey();
   }
-  if (!quickFill.employeeId || !state.employees.some((employee) => employee.id === quickFill.employeeId)) {
-    quickFill.employeeId = state.employees[0]?.id || "";
+  if (!quickFill.employeeId || !activeEmployees.some((employee) => employee.id === quickFill.employeeId)) {
+    quickFill.employeeId = activeEmployees[0]?.id || "";
   }
   dailyPeopleFill.employeeIds = new Set(
-    Array.from(dailyPeopleFill.employeeIds).filter((employeeId) => state.employees.some((employee) => employee.id === employeeId))
+    Array.from(dailyPeopleFill.employeeIds).filter((employeeId) => activeEmployees.some((employee) => employee.id === employeeId))
   );
   bulkFill.employeeIds = new Set(
-    Array.from(bulkFill.employeeIds).filter((employeeId) => state.employees.some((employee) => employee.id === employeeId))
+    Array.from(bulkFill.employeeIds).filter((employeeId) => activeEmployees.some((employee) => employee.id === employeeId))
   );
   if (!bulkFill.days.size) {
     bulkFill.days = new Set(getDefaultBulkDays());
@@ -390,19 +416,22 @@ function renderDailyLog() {
   els.dailyDateLabel.textContent = `${day.label} ${date.getDate()} ${MONTH_NAMES[date.getMonth()]} ${date.getFullYear()}`;
   renderDailyDayButtons();
   renderDailyProgress();
+  renderDailyReview();
   renderDailyPeoplePicker();
   renderDailyRosterTools();
 
-  if (!state.employees.length) {
+  if (!getActiveEmployees().length) {
     els.dailyRoster.innerHTML = `<div class="empty-state">No employees yet. Add your first employee.</div>`;
     els.dailyApplyCustom.disabled = true;
     els.dailyApplySelected.disabled = true;
     els.dailyCopyYesterday.disabled = true;
+    els.dailySignOff.disabled = true;
     return;
   }
 
   els.dailyApplyCustom.disabled = false;
   els.dailyApplySelected.disabled = false;
+  els.dailySignOff.disabled = false;
   els.dailyCopyYesterday.disabled = !hasYesterdayData();
   const employees = getFilteredDailyEmployees();
   if (!employees.length) {
@@ -412,16 +441,25 @@ function renderDailyLog() {
 
   const fragment = document.createDocumentFragment();
   groupEmployees(employees).forEach((group) => {
-    const section = document.createElement("section");
-    section.className = "daily-group";
+    const section = document.createElement("details");
+    section.className = "daily-group group-details";
+    section.dataset.groupLabel = group.label;
+    section.open = isGroupOpen(group.label);
     section.innerHTML = `
-      <div class="daily-group-heading">
+      <summary class="daily-group-heading">
         <strong>${escapeHtml(group.label)}</strong>
         <span>${group.employees.length} ${group.employees.length === 1 ? "person" : "people"}</span>
-      </div>
+        <span class="group-quick-actions" aria-label="Set ${escapeAttr(group.label)} hours">
+          <button type="button" class="button tiny secondary" data-daily-group-hours="0" data-group-label="${escapeAttr(group.label)}">Off</button>
+          <button type="button" class="button tiny secondary" data-daily-group-hours="5" data-group-label="${escapeAttr(group.label)}">5h</button>
+          <button type="button" class="button tiny secondary" data-daily-group-hours="10" data-group-label="${escapeAttr(group.label)}">10h</button>
+        </span>
+      </summary>
+      <div class="group-body"></div>
     `;
+    const groupBody = section.querySelector(".group-body");
     group.employees.forEach((employee) => {
-      section.appendChild(createDailyRow(employee));
+      groupBody.appendChild(createDailyRow(employee));
     });
     fragment.appendChild(section);
   });
@@ -447,6 +485,16 @@ function renderDailyProgress() {
   els.dailyProgress.textContent = `${stats.filledCount}/${stats.employeeCount} entered - ${formatNumber(stats.total)}h total`;
 }
 
+function renderDailyReview() {
+  const review = getDayReview(selectedDailyDayKey);
+  const signed = Boolean(review.signed);
+  els.dailyReviewStatus.textContent = signed ? `Signed off ${formatSignedTime(review.signedAt)}` : "Not signed off";
+  els.dailyReviewStatus.classList.toggle("is-signed", signed);
+  els.dailySignOff.textContent = signed ? "Undo sign-off" : "Sign off day";
+  els.dailySignOff.classList.toggle("primary", !signed);
+  els.dailySignOff.classList.toggle("secondary", signed);
+}
+
 function renderDailyRosterTools() {
   const employees = getFilteredDailyEmployees();
   els.dailySearch.value = dailySearchQuery;
@@ -456,13 +504,13 @@ function renderDailyRosterTools() {
   });
 
   const label = dailyRosterFilter === "missing" ? "Needs entry" : dailyRosterFilter === "entered" ? "Entered" : "All";
-  els.dailyFilterMeta.textContent = `${label} - ${employees.length}/${state.employees.length}`;
+  els.dailyFilterMeta.textContent = `${label} - ${employees.length}/${getActiveEmployees().length}`;
   els.dailyJumpMissing.disabled = !findFirstMissingDailyEmployee();
 }
 
 function getFilteredDailyEmployees() {
   const query = dailySearchQuery.trim().toLowerCase();
-  return state.employees.filter((employee) => {
+  return getActiveEmployees().filter((employee) => {
     const status = getDailyEntryStatus(employee.id);
     const matchesFilter =
       dailyRosterFilter === "all" ||
@@ -500,6 +548,11 @@ function jumpToMissingDailyRow() {
   requestAnimationFrame(() => {
     const row = els.dailyRoster.querySelector(`[data-employee-id="${cssEscape(employee.id)}"]`);
     if (row) {
+      const group = row.closest(".group-details");
+      if (group) {
+        group.open = true;
+        rememberGroupToggle(group);
+      }
       row.scrollIntoView({ behavior: "smooth", block: "center" });
       row.classList.add("is-targeted");
       window.setTimeout(() => row.classList.remove("is-targeted"), 1400);
@@ -508,7 +561,7 @@ function jumpToMissingDailyRow() {
 }
 
 function findFirstMissingDailyEmployee() {
-  return state.employees.find((employee) => {
+  return getActiveEmployees().find((employee) => {
     const status = getDailyEntryStatus(employee.id);
     if (status !== "missing" && status !== "invalid") return false;
     if (!dailySearchQuery.trim()) return true;
@@ -534,12 +587,13 @@ function renderDailyPeoplePicker() {
     createDailyPeopleButton("clear", "Clear", false)
   );
 
-  if (!state.employees.length) {
+  const activeEmployees = getActiveEmployees();
+  if (!activeEmployees.length) {
     els.dailyPeopleList.innerHTML = `<div class="empty-state">No employees yet.</div>`;
     return;
   }
 
-  const nodes = state.employees.map((employee) => {
+  const nodes = activeEmployees.map((employee) => {
     const label = document.createElement("label");
     label.className = "check-row";
     label.innerHTML = `
@@ -605,10 +659,12 @@ function createDailyRow(employee) {
         ${noteOpen ? "Hide note" : dayEntry.note ? "Edit note" : "Add note"}
       </button>
       <div class="note-wrap${noteOpen ? " is-open" : ""}">
+        ${renderNoteTemplateButtons(employee.id, selectedDailyDayKey, "daily")}
         <label>
           Note
           <textarea rows="2" data-daily-note data-employee-id="${escapeAttr(employee.id)}">${escapeHtml(dayEntry.note)}</textarea>
         </label>
+        <button type="button" class="button tiny secondary" data-daily-action="save-note-template" data-employee-id="${escapeAttr(employee.id)}">Save note as template</button>
       </div>
     </div>
   `;
@@ -653,18 +709,51 @@ function handleDailyDayClick(event) {
   renderApp();
 }
 
+function toggleDailySignOff() {
+  const review = getDayReview(selectedDailyDayKey);
+  if (review.signed) {
+    review.signed = false;
+    review.signedAt = "";
+    showDailyNotice(`${dayByKey(selectedDailyDayKey).short} sign-off removed.`);
+  } else {
+    review.signed = true;
+    review.signedAt = new Date().toISOString();
+    showDailyNotice(`${dayByKey(selectedDailyDayKey).short} signed off.`);
+  }
+  saveState();
+  renderApp();
+}
+
 function applyDailyHoursToEveryone(hours) {
-  if (!state.employees.length) {
+  const activeEmployees = getActiveEmployees();
+  if (!activeEmployees.length) {
     showDailyNotice("Add employees before filling a day.");
     return;
   }
 
-  state.employees.forEach((employee) => {
+  activeEmployees.forEach((employee) => {
     getEmployeeEntry(employee.id).days[selectedDailyDayKey].hours = formatNumber(Math.max(0, Number(hours) || 0));
   });
+  clearDayReview(selectedDailyDayKey);
   saveState();
   renderApp();
-  showDailyNotice(`${state.employees.length} ${state.employees.length === 1 ? "person" : "people"} updated for ${dayByKey(selectedDailyDayKey).short}.`);
+  showDailyNotice(`${activeEmployees.length} ${activeEmployees.length === 1 ? "person" : "people"} updated for ${dayByKey(selectedDailyDayKey).short}.`);
+}
+
+function applyDailyHoursToGroup(groupLabel, hours) {
+  const employees = getActiveEmployees().filter((employee) => displayEmployeeGroup(employee) === groupLabel);
+  if (!employees.length) {
+    showDailyNotice("No active people in that group.");
+    return;
+  }
+
+  employees.forEach((employee) => {
+    getEmployeeEntry(employee.id).days[selectedDailyDayKey].hours = formatNumber(Math.max(0, Number(hours) || 0));
+  });
+  clearDayReview(selectedDailyDayKey);
+  saveState();
+  renderApp();
+  showDailyNotice(`${groupLabel}: ${employees.length} ${employees.length === 1 ? "person" : "people"} updated.`);
 }
 
 function applyDailyCustomToEveryone() {
@@ -683,7 +772,7 @@ function copyYesterdayToSelectedDay() {
   const previous = getAdjacentDayRef(-1);
   let copiedCount = 0;
 
-  state.employees.forEach((employee) => {
+  getActiveEmployees().forEach((employee) => {
     const source = state.weeks[previous.weekKey]?.entries?.[employee.id]?.days?.[previous.dayKey];
     if (!source) return;
     getEmployeeEntry(employee.id).days[selectedDailyDayKey] = {
@@ -698,6 +787,7 @@ function copyYesterdayToSelectedDay() {
     return;
   }
 
+  clearDayReview(selectedDailyDayKey);
   saveState();
   renderApp();
   showDailyNotice(`Copied yesterday for ${copiedCount} ${copiedCount === 1 ? "person" : "people"}.`);
@@ -705,7 +795,7 @@ function copyYesterdayToSelectedDay() {
 
 function hasYesterdayData() {
   const previous = getAdjacentDayRef(-1);
-  return state.employees.some((employee) => {
+  return getActiveEmployees().some((employee) => {
     const source = state.weeks[previous.weekKey]?.entries?.[employee.id]?.days?.[previous.dayKey];
     if (!source) return false;
     return String(source.hours ?? "").trim() !== "" || String(source.note ?? "").trim() !== "";
@@ -762,6 +852,7 @@ function applyDailyCustomToSelectedPeople() {
   employeeIds.forEach((employeeId) => {
     getEmployeeEntry(employeeId).days[selectedDailyDayKey].hours = formatNumber(parsed.value);
   });
+  clearDayReview(selectedDailyDayKey);
   saveState();
   renderApp();
   showDailyNotice(`${employeeIds.length} ${employeeIds.length === 1 ? "person" : "people"} updated.`);
@@ -769,14 +860,28 @@ function applyDailyCustomToSelectedPeople() {
 
 function getDailySelectedEmployeeIds() {
   if (dailyPeopleFill.applyAll) {
-    return state.employees.map((employee) => employee.id);
+    return getActiveEmployees().map((employee) => employee.id);
   }
   return Array.from(dailyPeopleFill.employeeIds).filter((employeeId) =>
-    state.employees.some((employee) => employee.id === employeeId)
+    getActiveEmployees().some((employee) => employee.id === employeeId)
   );
 }
 
 function handleDailyRosterClick(event) {
+  const groupButton = event.target.closest("[data-daily-group-hours]");
+  if (groupButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    applyDailyHoursToGroup(groupButton.dataset.groupLabel, Number(groupButton.dataset.dailyGroupHours));
+    return;
+  }
+
+  const templateButton = event.target.closest("[data-note-template]");
+  if (templateButton) {
+    applyNoteTemplate(templateButton.dataset.employeeId, selectedDailyDayKey, templateButton.dataset.noteTemplate);
+    return;
+  }
+
   const button = event.target.closest("[data-daily-action]");
   if (!button) return;
 
@@ -796,11 +901,22 @@ function handleDailyRosterClick(event) {
     expandedDailyEmployeeId = employeeId;
     renderDailyLog();
   }
+  if (button.dataset.dailyAction === "save-note-template") {
+    addNoteTemplate(getEmployeeEntry(employeeId).days[selectedDailyDayKey].note);
+  }
 }
 
 function handleDailyRosterToggle(event) {
-  const row = event.target.closest(".daily-row");
-  if (!row) return;
+  const details = event.target;
+  if (!(details instanceof HTMLDetailsElement)) return;
+
+  if (details.classList.contains("group-details")) {
+    rememberGroupToggle(details);
+    return;
+  }
+
+  if (!details.classList.contains("daily-row")) return;
+  const row = details;
 
   if (row.open) {
     expandedDailyEmployeeId = row.dataset.employeeId;
@@ -822,9 +938,11 @@ function handleDailyRosterInput(event) {
     if (target.value.startsWith("-")) target.value = "";
     getEmployeeEntry(employeeId).days[selectedDailyDayKey].hours = target.value;
     expandedDailyEmployeeId = employeeId;
+    clearDayReview(selectedDailyDayKey);
     saveState();
     updateDailyRow(target.closest(".daily-row"), employeeId);
     renderDailyProgress();
+    renderDailyReview();
     renderSummaryView();
     renderLogEmployeeList();
     renderPrintReport();
@@ -834,7 +952,9 @@ function handleDailyRosterInput(event) {
   if (target.matches("[data-daily-note]")) {
     getEmployeeEntry(employeeId).days[selectedDailyDayKey].note = target.value;
     expandedDailyEmployeeId = employeeId;
+    clearDayReview(selectedDailyDayKey);
     saveState();
+    renderDailyReview();
     renderSummaryView();
     renderPrintReport();
   }
@@ -849,6 +969,7 @@ function handleDailyRosterKeydown(event) {
 function setDailyEmployeeHours(employeeId, hours) {
   getEmployeeEntry(employeeId).days[selectedDailyDayKey].hours = formatNumber(Math.max(0, Number(hours) || 0));
   expandedDailyEmployeeId = employeeId;
+  clearDayReview(selectedDailyDayKey);
   saveState();
   renderApp();
 }
@@ -859,6 +980,7 @@ function stepDailyEmployeeHours(employeeId, step) {
   const current = parsed.valid ? parsed.value : 0;
   dayEntry.hours = formatNumber(Math.max(0, current + step));
   expandedDailyEmployeeId = employeeId;
+  clearDayReview(selectedDailyDayKey);
   saveState();
   renderApp();
 }
@@ -883,10 +1005,11 @@ function updateDailyRow(row, employeeId) {
 }
 
 function calculateDailyStats(dayKey) {
-  const employeeCount = state.employees.length;
+  const activeEmployees = getActiveEmployees();
+  const employeeCount = activeEmployees.length;
   let filledCount = 0;
   let total = 0;
-  state.employees.forEach((employee) => {
+  activeEmployees.forEach((employee) => {
     const parsed = parseHours(getEmployeeEntry(employee.id).days[dayKey].hours);
     if (!parsed.empty && parsed.valid) filledCount += 1;
     total += parsed.value;
@@ -895,14 +1018,15 @@ function calculateDailyStats(dayKey) {
 }
 
 function renderQuickFill() {
-  const options = state.employees.map((employee) => {
+  const activeEmployees = getActiveEmployees();
+  const options = activeEmployees.map((employee) => {
     const selected = employee.id === quickFill.employeeId ? " selected" : "";
     return `<option value="${escapeAttr(employee.id)}"${selected}>${escapeHtml(displayEmployeeOptionLabel(employee))}</option>`;
   });
 
   els.quickEmployee.innerHTML = options.length ? options.join("") : `<option value="">No employees yet</option>`;
-  els.quickEmployee.disabled = !state.employees.length;
-  els.quickApply.disabled = !state.employees.length;
+  els.quickEmployee.disabled = !activeEmployees.length;
+  els.quickApply.disabled = !activeEmployees.length;
 
   els.quickPresetButtons.replaceChildren(...QUICK_PRESETS.map((preset) => {
     const button = document.createElement("button");
@@ -987,6 +1111,7 @@ function applyQuickFill() {
   }
 
   setEmployeeDays(employeeId, days, hours.value);
+  clearDayReviews(days);
   expandedEmployeeId = employeeId;
   saveState();
   renderApp();
@@ -1001,17 +1126,18 @@ function getQuickPresetHours() {
 }
 
 function renderBulkFill() {
-  els.bulkApply.disabled = !state.employees.length;
+  const activeEmployees = getActiveEmployees();
+  els.bulkApply.disabled = !activeEmployees.length;
   els.bulkPeopleActions.replaceChildren(
     createBulkPeopleButton("all", "All people", bulkFill.applyAll),
     createBulkPeopleButton("choose", "Choose", !bulkFill.applyAll),
     createBulkPeopleButton("clear", "Clear", false)
   );
 
-  if (!state.employees.length) {
+  if (!activeEmployees.length) {
     els.bulkPeopleList.innerHTML = `<div class="empty-state">No employees yet.</div>`;
   } else {
-    const peopleNodes = state.employees.map((employee) => {
+    const peopleNodes = activeEmployees.map((employee) => {
       const label = document.createElement("label");
       label.className = "check-row";
       label.innerHTML = `
@@ -1139,6 +1265,7 @@ function applyBulkFill() {
   }
 
   employeeIds.forEach((employeeId) => setEmployeeDays(employeeId, days, hours.value));
+  clearDayReviews(days);
   expandedEmployeeId = employeeIds[0] || expandedEmployeeId;
   saveState();
   renderApp();
@@ -1154,10 +1281,10 @@ function getBulkPresetHours() {
 
 function getBulkEmployeeIds() {
   if (bulkFill.applyAll) {
-    return state.employees.map((employee) => employee.id);
+    return getActiveEmployees().map((employee) => employee.id);
   }
   return Array.from(bulkFill.employeeIds).filter((employeeId) =>
-    state.employees.some((employee) => employee.id === employeeId)
+    getActiveEmployees().some((employee) => employee.id === employeeId)
   );
 }
 
@@ -1185,13 +1312,14 @@ function isBulkDaySelected(key, days) {
 }
 
 function renderLogEmployeeList() {
-  if (!state.employees.length) {
+  const activeEmployees = getActiveEmployees();
+  if (!activeEmployees.length) {
     els.logEmployeeList.innerHTML = `<div class="empty-state">No employees yet. Add your first employee.</div>`;
     return;
   }
 
   const fragment = document.createDocumentFragment();
-  state.employees.forEach((employee) => {
+  activeEmployees.forEach((employee) => {
     fragment.appendChild(createLogEmployeeCard(employee));
   });
   els.logEmployeeList.replaceChildren(fragment);
@@ -1306,10 +1434,12 @@ function renderDayEntry(employeeId, day, index) {
         ${noteOpen ? "Hide note" : dayEntry.note ? "Edit note" : "Add note"}
       </button>
       <div class="note-wrap${noteOpen ? " is-open" : ""}">
+        ${renderNoteTemplateButtons(employeeId, day.key, "week")}
         <label>
           Note
           <textarea rows="2" data-note-input data-employee-id="${escapeAttr(employeeId)}" data-day="${day.key}">${escapeHtml(dayEntry.note)}</textarea>
         </label>
+        <button type="button" class="button tiny secondary" data-log-action="save-note-template" data-employee-id="${escapeAttr(employeeId)}" data-day="${day.key}">Save note as template</button>
       </div>
     </section>
   `;
@@ -1322,7 +1452,8 @@ function renderSummaryView() {
     { label: "Active employees", value: String(summary.activeCount), detail: "Any hours logged" },
     { label: "Over threshold", value: String(summary.overThreshold.length), detail: `${formatNumber(getThreshold())}h threshold` },
     { label: "Missing entries", value: String(summary.missingEntries.length), detail: "At least one blank day" },
-    { label: "Empty weeks", value: String(summary.emptyWeeks.length), detail: "All days empty or 0" }
+    { label: "Empty weeks", value: String(summary.emptyWeeks.length), detail: "All days empty or 0" },
+    { label: "Signed days", value: `${summary.signedDays}/7`, detail: "Daily review" }
   ];
 
   els.summaryMetrics.replaceChildren(...metrics.map(createMetric));
@@ -1332,6 +1463,7 @@ function renderSummaryView() {
   renderDayTotals(summary);
   renderEmployeeTotals(summary);
   renderWarningSummary(summary);
+  renderOvertimeReview(summary);
 }
 
 function createMetric(metric) {
@@ -1354,14 +1486,14 @@ function renderDayTotals(summary) {
     row.className = "list-item";
     row.innerHTML = `<strong></strong><span></span>`;
     row.querySelector("strong").textContent = `${day.short} ${addDays(selectedWeekStart, index).getDate()}`;
-    row.querySelector("span").textContent = `${formatNumber(summary.dayTotals[day.key])}h`;
+    row.querySelector("span").textContent = `${formatNumber(summary.dayTotals[day.key])}h${getDayReview(day.key).signed ? " - signed" : ""}`;
     return row;
   });
   els.dayTotals.replaceChildren(...nodes);
 }
 
 function renderEmployeeTotals(summary) {
-  if (!state.employees.length) {
+  if (!summary.employees.length) {
     els.employeeTotals.innerHTML = `<div class="empty-state">No employees yet. Add your first employee.</div>`;
     return;
   }
@@ -1378,7 +1510,7 @@ function renderEmployeeTotals(summary) {
 }
 
 function renderWarningSummary(summary) {
-  if (!state.employees.length) {
+  if (!summary.employees.length) {
     els.warningSummary.innerHTML = `<div class="empty-state">Warnings will appear after employees are added.</div>`;
     return;
   }
@@ -1398,11 +1530,69 @@ function renderWarningSummary(summary) {
   els.warningSummary.replaceChildren(...badges);
 }
 
+function renderOvertimeReview(summary) {
+  if (!els.overtimeReview) return;
+  const threshold = getThreshold();
+  const overtimeItems = summary.overThreshold;
+  els.overtimeMeta.textContent = `${overtimeItems.length} ${overtimeItems.length === 1 ? "person" : "people"}`;
+
+  if (!overtimeItems.length) {
+    els.overtimeReview.innerHTML = `<div class="empty-state">No employees are over the ${formatNumber(threshold)}h threshold this week.</div>`;
+    return;
+  }
+
+  const nodes = overtimeItems.map((item) => {
+    const node = document.createElement("article");
+    node.className = "overtime-card";
+    const daily = DAYS
+      .map((day) => `<span><strong>${day.short}</strong>${formatNumber(item.dayValues[day.key])}h</span>`)
+      .join("");
+    node.innerHTML = `
+      <div class="overtime-card-head">
+        <div>
+          <strong>${escapeHtml(displayEmployeeName(item.employee))}</strong>
+          <span>${escapeHtml(displayEmployeeGroup(item.employee))}${item.employee.role ? ` - ${escapeHtml(item.employee.role)}` : ""}</span>
+        </div>
+        <div class="employee-total">
+          <strong>${formatNumber(item.total)}h</strong>
+          <span>${formatNumber(item.total - threshold)}h over</span>
+        </div>
+      </div>
+      <div class="overtime-days">${daily}</div>
+    `;
+    return node;
+  });
+  els.overtimeReview.replaceChildren(...nodes);
+}
+
 function createBadge(text, type) {
   const node = document.createElement("span");
   node.className = `badge ${type || ""}`.trim();
   node.textContent = text;
   return node;
+}
+
+function getActiveEmployees() {
+  return state.employees.filter((employee) => !employee.archivedAt);
+}
+
+function getArchivedEmployees() {
+  return state.employees.filter((employee) => employee.archivedAt);
+}
+
+function getReportEmployees() {
+  return state.employees.filter((employee) => !employee.archivedAt || employeeHasWeekData(employee.id));
+}
+
+function employeeHasWeekData(employeeId) {
+  const week = getWeek();
+  const entry = week.entries[employeeId];
+  if (!entry) return false;
+  return DAYS.some((day) => {
+    const dayEntry = entry.days?.[day.key];
+    if (!dayEntry) return false;
+    return String(dayEntry.hours ?? "").trim() !== "" || String(dayEntry.note ?? "").trim() !== "";
+  });
 }
 
 function groupEmployees(employees) {
@@ -1421,38 +1611,137 @@ function groupEmployees(employees) {
     }));
 }
 
+function getGroupNames() {
+  return Array.from(new Set(
+    state.employees
+      .map((employee) => (employee.group || "").trim())
+      .filter(Boolean)
+  )).sort((left, right) => left.localeCompare(right));
+}
+
+function renderGroupOptions() {
+  if (!els.employeeGroupOptions) return;
+  const groupNames = getGroupNames();
+  const options = groupNames.map((groupName) => {
+    const option = document.createElement("option");
+    option.value = groupName;
+    return option;
+  });
+  els.employeeGroupOptions.replaceChildren(...options);
+  renderGroupChoiceButtons(els.employeeGroupChoices, "employeeGroup", groupNames);
+  renderGroupChoiceButtons(els.modalEmployeeGroupChoices, "modalEmployeeGroup", groupNames);
+}
+
+function renderGroupChoiceButtons(container, inputId, groupNames) {
+  if (!container) return;
+  if (!groupNames.length) {
+    container.replaceChildren();
+    container.classList.add("is-hidden");
+    return;
+  }
+
+  const label = document.createElement("span");
+  label.className = "mini-label";
+  label.textContent = "Existing groups";
+  const buttons = groupNames.map((groupName) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "group-choice-button";
+    button.dataset.groupChoice = groupName;
+    button.dataset.groupTarget = inputId;
+    button.textContent = groupName;
+    return button;
+  });
+  container.classList.remove("is-hidden");
+  container.replaceChildren(label, ...buttons);
+}
+
+function handleGroupChoiceClick(event) {
+  const button = event.target.closest("[data-group-choice]");
+  if (!button) return;
+  const input = document.getElementById(button.dataset.groupTarget);
+  if (!input) return;
+  input.value = button.dataset.groupChoice;
+  input.focus();
+}
+
+function getGroupKey(label) {
+  return String(label || "").trim().toLowerCase() || "no-company-or-group";
+}
+
+function isGroupOpen(label) {
+  return !collapsedGroupKeys.has(getGroupKey(label));
+}
+
+function rememberGroupToggle(details) {
+  const key = getGroupKey(details.dataset.groupLabel);
+  if (details.open) {
+    collapsedGroupKeys.delete(key);
+  } else {
+    collapsedGroupKeys.add(key);
+  }
+}
+
 function renderBadges(badges) {
   if (!badges.length) return `<span class="badge ok">Ready</span>`;
   return badges.map((badge) => `<span class="badge ${badge.type}">${escapeHtml(badge.label)}</span>`).join("");
 }
 
 function renderPeopleView() {
+  const activeEmployees = getActiveEmployees();
+  const archivedEmployees = getArchivedEmployees();
   if (!state.employees.length) {
     els.peopleList.innerHTML = `<div class="empty-state">No employees yet. Add your first employee.</div>`;
     return;
   }
 
   const fragment = document.createDocumentFragment();
-  groupEmployees(state.employees).forEach((group) => {
-    const section = document.createElement("section");
-    section.className = "people-group";
-    section.innerHTML = `
-      <div class="daily-group-heading">
-        <strong>${escapeHtml(group.label)}</strong>
-        <span>${group.employees.length} ${group.employees.length === 1 ? "person" : "people"}</span>
-      </div>
-    `;
-    group.employees.forEach((employee) => {
-      const card = document.createElement("details");
-      card.className = "person-card person-details";
-      card.dataset.employeeId = employee.id;
-      card.innerHTML = `
+  if (activeEmployees.length) {
+    groupEmployees(activeEmployees).forEach((group) => {
+      fragment.appendChild(createPeopleGroup(group, false));
+    });
+  } else {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "No active employees. Restore an archived employee or add a new one.";
+    fragment.appendChild(empty);
+  }
+
+  if (archivedEmployees.length) {
+    const archived = {
+      label: "Archived employees",
+      employees: archivedEmployees.slice().sort((left, right) => displayEmployeeName(left).localeCompare(displayEmployeeName(right)))
+    };
+    fragment.appendChild(createPeopleGroup(archived, true));
+  }
+
+  els.peopleList.replaceChildren(fragment);
+}
+
+function createPeopleGroup(group, archived) {
+  const section = document.createElement("details");
+  section.className = `people-group group-details${archived ? " archived-group" : ""}`;
+  section.dataset.groupLabel = group.label;
+  section.open = !archived && (isGroupOpen(group.label) || group.employees.some((employee) => employee.id === focusPersonId));
+  section.innerHTML = `
+    <summary class="daily-group-heading">
+      <strong>${escapeHtml(group.label)}</strong>
+      <span>${group.employees.length} ${group.employees.length === 1 ? "person" : "people"}</span>
+    </summary>
+    <div class="group-body"></div>
+  `;
+  const groupBody = section.querySelector(".group-body");
+  group.employees.forEach((employee) => {
+    const card = document.createElement("details");
+    card.className = "person-card person-details";
+    card.dataset.employeeId = employee.id;
+    card.innerHTML = `
         <summary>
           <span>
             <strong>${escapeHtml(displayEmployeeName(employee))}</strong>
-            <small>${escapeHtml(displayEmployeeGroup(employee))}${employee.role ? ` - ${escapeHtml(employee.role)}` : ""}</small>
+            <small>${escapeHtml(displayEmployeeGroup(employee))}${employee.role ? ` - ${escapeHtml(employee.role)}` : ""}${archived ? " - Archived" : ""}</small>
           </span>
-          <span class="summary-meta">Edit</span>
+          <span class="summary-meta">${archived ? "Restore" : "Edit"}</span>
         </summary>
         <div class="person-fields">
           <label>
@@ -1461,27 +1750,32 @@ function renderPeopleView() {
           </label>
           <label>
             Company or group
-            <input type="text" value="${escapeAttr(employee.group || "")}" autocomplete="off" data-person-group data-employee-id="${escapeAttr(employee.id)}">
+            <input type="text" value="${escapeAttr(employee.group || "")}" autocomplete="off" list="employeeGroupOptions" data-person-group data-employee-id="${escapeAttr(employee.id)}">
           </label>
           <label>
             Role or note
             <input type="text" value="${escapeAttr(employee.role || "")}" autocomplete="off" data-person-role data-employee-id="${escapeAttr(employee.id)}">
           </label>
         </div>
-        <button type="button" class="button danger" data-delete-employee data-employee-id="${escapeAttr(employee.id)}">Delete</button>
+        <button type="button" class="button ${archived ? "secondary" : "danger"}" ${archived ? "data-restore-employee" : "data-archive-employee"} data-employee-id="${escapeAttr(employee.id)}">${archived ? "Restore employee" : "Archive employee"}</button>
       `;
-      section.appendChild(card);
-    });
-    fragment.appendChild(section);
+    groupBody.appendChild(card);
   });
-  els.peopleList.replaceChildren(fragment);
+  return section;
 }
 
 function renderSettingsView() {
   els.thresholdInput.value = formatNumber(getThreshold());
+  renderNoteTemplateSettings();
 }
 
 function handleLogClick(event) {
+  const templateButton = event.target.closest("[data-note-template]");
+  if (templateButton) {
+    applyNoteTemplate(templateButton.dataset.employeeId, templateButton.dataset.day, templateButton.dataset.noteTemplate);
+    return;
+  }
+
   const scopeButton = event.target.closest("[data-apply-scope]");
   if (scopeButton) {
     selectApplyScope(scopeButton);
@@ -1543,6 +1837,11 @@ function handleLogClick(event) {
 
   if (action === "toggle-note") {
     toggleNote(employeeId, button.dataset.day);
+    return;
+  }
+
+  if (action === "save-note-template") {
+    addNoteTemplate(getEmployeeEntry(employeeId).days[button.dataset.day].note);
   }
 }
 
@@ -1553,6 +1852,7 @@ function handleLogInput(event) {
     const employeeId = target.dataset.employeeId;
     const dayKey = target.dataset.day;
     getEmployeeEntry(employeeId).days[dayKey].hours = target.value;
+    clearDayReview(dayKey);
     saveState();
     updateAfterEmployeeChange(employeeId, target.closest(".employee-card"));
     updateDayEntry(target.closest(".day-entry"), employeeId, dayKey);
@@ -1563,6 +1863,7 @@ function handleLogInput(event) {
     const employeeId = target.dataset.employeeId;
     const dayKey = target.dataset.day;
     getEmployeeEntry(employeeId).days[dayKey].note = target.value;
+    clearDayReview(dayKey);
     saveState();
     updateAfterEmployeeChange(employeeId, target.closest(".employee-card"));
   }
@@ -1586,6 +1887,7 @@ function selectApplyScope(button) {
 function applyWeekPattern(employeeId, weekdayHours) {
   setEmployeeDays(employeeId, DAY_GROUPS.weekdays, weekdayHours);
   setEmployeeDays(employeeId, DAY_GROUPS.weekend, 0);
+  clearDayReviews(DAY_GROUPS.all);
   expandedEmployeeId = employeeId;
   saveState();
   renderApp();
@@ -1597,6 +1899,7 @@ function clearEmployeeWeek(employeeId) {
     entry.days[day.key] = { hours: "0", note: "" };
     openNotes.delete(getNoteKey(employeeId, day.key));
   });
+  clearDayReviews(DAY_GROUPS.all);
   expandedEmployeeId = employeeId;
   saveState();
   renderApp();
@@ -1611,6 +1914,7 @@ function copyPreviousWeek(employeeId, card) {
   }
 
   getWeek().entries[employeeId] = normalizeEntry(JSON.parse(JSON.stringify(previousEntry)), false);
+  clearDayReviews(DAY_GROUPS.all);
   expandedEmployeeId = employeeId;
   saveState();
   renderApp();
@@ -1627,7 +1931,9 @@ function applySameHours(employeeId, card) {
   input.classList.remove("is-invalid");
 
   const selectedScope = card.querySelector("[data-apply-scope][aria-pressed='true']")?.dataset.applyScope || "weekdays";
-  setEmployeeDays(employeeId, DAY_GROUPS[selectedScope] || DAY_GROUPS.weekdays, parsed.value);
+  const days = DAY_GROUPS[selectedScope] || DAY_GROUPS.weekdays;
+  setEmployeeDays(employeeId, days, parsed.value);
+  clearDayReviews(days);
   expandedEmployeeId = employeeId;
   saveState();
   renderApp();
@@ -1636,6 +1942,7 @@ function applySameHours(employeeId, card) {
 function setDayHours(employeeId, dayKey, hours) {
   const value = Math.max(0, Number(hours) || 0);
   getEmployeeEntry(employeeId).days[dayKey].hours = formatNumber(value);
+  clearDayReview(dayKey);
   expandedEmployeeId = employeeId;
   saveState();
   renderApp();
@@ -1647,6 +1954,7 @@ function stepDayHours(employeeId, dayKey, step) {
   const current = parsed.valid ? parsed.value : 0;
   const next = Math.max(0, current + step);
   dayEntry.hours = formatNumber(next);
+  clearDayReview(dayKey);
   expandedEmployeeId = employeeId;
   saveState();
   renderApp();
@@ -1698,6 +2006,90 @@ function setCardNotice(card, message) {
   if (notice) notice.textContent = message;
 }
 
+function renderNoteTemplateButtons(employeeId, dayKey) {
+  if (!state.noteTemplates.length) return "";
+  const buttons = state.noteTemplates.map((template) => `
+    <button type="button" class="note-template-button" data-note-template="${escapeAttr(template)}" data-employee-id="${escapeAttr(employeeId)}" data-day="${escapeAttr(dayKey)}">${escapeHtml(template)}</button>
+  `).join("");
+  return `<div class="note-template-row"><span class="mini-label">Templates</span>${buttons}</div>`;
+}
+
+function applyNoteTemplate(employeeId, dayKey, template) {
+  const cleanTemplate = String(template || "").trim();
+  if (!cleanTemplate || !isDayKey(dayKey)) return;
+  const dayEntry = getEmployeeEntry(employeeId).days[dayKey];
+  const current = String(dayEntry.note || "").trim();
+  dayEntry.note = current ? `${current}\n${cleanTemplate}` : cleanTemplate;
+  openNotes.add(getNoteKey(employeeId, dayKey));
+  expandedDailyEmployeeId = employeeId;
+  expandedEmployeeId = employeeId;
+  clearDayReview(dayKey);
+  saveState();
+  renderApp();
+}
+
+function addNoteTemplate(value, noticeTarget = "daily") {
+  const template = String(value || "").trim();
+  if (!template) {
+    showTemplateNotice("Enter a note first.", noticeTarget);
+    return false;
+  }
+
+  const exists = state.noteTemplates.some((item) => item.toLowerCase() === template.toLowerCase());
+  if (exists) {
+    showTemplateNotice("That template already exists.", noticeTarget);
+    return false;
+  }
+
+  state.noteTemplates.push(template);
+  state.noteTemplates.sort((left, right) => left.localeCompare(right));
+  saveState();
+  renderApp();
+  showTemplateNotice("Template saved.", noticeTarget);
+  return true;
+}
+
+function showTemplateNotice(message, target) {
+  if (target === "settings") {
+    showDataNotice(message);
+  } else {
+    showDailyNotice(message);
+  }
+}
+
+function addNoteTemplateFromSettings() {
+  if (addNoteTemplate(els.noteTemplateInput.value, "settings")) {
+    els.noteTemplateInput.value = "";
+  }
+}
+
+function renderNoteTemplateSettings() {
+  if (!els.noteTemplateList) return;
+  if (!state.noteTemplates.length) {
+    els.noteTemplateList.innerHTML = `<div class="empty-state">No note templates yet.</div>`;
+    return;
+  }
+
+  const nodes = state.noteTemplates.map((template) => {
+    const row = document.createElement("div");
+    row.className = "template-item";
+    row.innerHTML = `
+      <span>${escapeHtml(template)}</span>
+      <button type="button" class="button tiny secondary" data-remove-template="${escapeAttr(template)}">Remove</button>
+    `;
+    return row;
+  });
+  els.noteTemplateList.replaceChildren(...nodes);
+}
+
+function handleNoteTemplateSettingsClick(event) {
+  const button = event.target.closest("[data-remove-template]");
+  if (!button) return;
+  state.noteTemplates = state.noteTemplates.filter((template) => template !== button.dataset.removeTemplate);
+  saveState();
+  renderSettingsView();
+}
+
 function setEmployeeDays(employeeId, days, hours) {
   const value = formatNumber(Math.max(0, Number(hours) || 0));
   const entry = getEmployeeEntry(employeeId);
@@ -1739,7 +2131,8 @@ function createEmployeeFromFields(name, group, role) {
     id: createId(),
     name: employeeName,
     group: String(group || "").trim(),
-    role: String(role || "").trim()
+    role: String(role || "").trim(),
+    archivedAt: ""
   };
   state.employees.push(employee);
   expandedEmployeeId = employee.id;
@@ -1785,6 +2178,7 @@ function handlePeopleInput(event) {
   }
 
   saveState();
+  renderGroupOptions();
   renderDailyLog();
   renderQuickFill();
   renderBulkFill();
@@ -1793,24 +2187,35 @@ function handlePeopleInput(event) {
   renderPrintReport();
 }
 
+function handlePeopleToggle(event) {
+  const details = event.target;
+  if (!(details instanceof HTMLDetailsElement) || !details.classList.contains("group-details")) return;
+  rememberGroupToggle(details);
+}
+
 function handlePeopleClick(event) {
-  const button = event.target.closest("[data-delete-employee]");
+  const archiveButton = event.target.closest("[data-archive-employee]");
+  const restoreButton = event.target.closest("[data-restore-employee]");
+  const button = archiveButton || restoreButton;
   if (!button) return;
 
   const employeeId = button.dataset.employeeId;
   const employee = state.employees.find((item) => item.id === employeeId);
   if (!employee) return;
 
-  const confirmed = window.confirm(`Delete ${displayEmployeeName(employee)}? Saved hours for this person will be removed from every week.`);
-  if (!confirmed) return;
+  if (archiveButton) {
+    const confirmed = window.confirm(`Archive ${displayEmployeeName(employee)}? Saved hours and notes will stay in reports and backups.`);
+    if (!confirmed) return;
+    employee.archivedAt = new Date().toISOString();
+  }
 
-  state.employees = state.employees.filter((item) => item.id !== employeeId);
-  Object.values(state.weeks).forEach((week) => {
-    if (week.entries) delete week.entries[employeeId];
-  });
+  if (restoreButton) {
+    employee.archivedAt = "";
+  }
+
   if (expandedEmployeeId === employeeId) expandedEmployeeId = null;
   if (expandedDailyEmployeeId === employeeId) expandedDailyEmployeeId = null;
-  if (quickFill.employeeId === employeeId) quickFill.employeeId = state.employees[0]?.id || "";
+  if (quickFill.employeeId === employeeId) quickFill.employeeId = getActiveEmployees()[0]?.id || "";
   saveState();
   renderApp();
 }
@@ -1833,7 +2238,7 @@ function handleThresholdInput() {
 
 function calculateWeekSummary() {
   const dayTotals = Object.fromEntries(DAYS.map((day) => [day.key, 0]));
-  const employees = state.employees.map((employee) => {
+  const employees = getReportEmployees().map((employee) => {
     const analysis = analyzeEmployee(employee.id);
     DAYS.forEach((day) => {
       dayTotals[day.key] += analysis.dayValues[day.key] || 0;
@@ -1849,6 +2254,7 @@ function calculateWeekSummary() {
     warningCount,
     combinedTotal: employees.reduce((sum, item) => sum + item.total, 0),
     activeCount: employees.filter((item) => item.hasLoggedHours).length,
+    signedDays: DAYS.filter((day) => getDayReview(day.key).signed).length,
     overThreshold: employees.filter((item) => item.isOverThreshold),
     missingEntries: employees.filter((item) => item.hasMissingDays),
     emptyWeeks: employees.filter((item) => item.isEmptyWeek),
@@ -1934,6 +2340,7 @@ function clearAllData() {
   bulkFill.employeeIds.clear();
   dailyPeopleFill.applyAll = false;
   dailyPeopleFill.employeeIds.clear();
+  openNotes.clear();
   localStorage.removeItem(STORAGE_KEY);
   renderApp();
   markSaved("All data cleared.");
@@ -1957,7 +2364,7 @@ function exportCsv() {
 
   headers.push("weekly total", "threshold", "warning status");
 
-  const rows = state.employees.map((employee) => {
+  const rows = getReportEmployees().map((employee) => {
     const entry = getEmployeeEntry(employee.id);
     const analysis = analyzeEmployee(employee.id);
     const row = [
@@ -1981,11 +2388,7 @@ function exportCsv() {
 }
 
 function renderPrintReport() {
-  const summary = calculateWeekSummary();
-  const weekStartKey = getWeekKey();
-  const weekEndKey = toDateKey(addDays(selectedWeekStart, 6));
-
-  const employeeRows = state.employees.map((employee) => {
+  const employeeRows = getReportEmployees().map((employee) => {
     const entry = getEmployeeEntry(employee.id);
     const analysis = analyzeEmployee(employee.id);
     const cells = [
@@ -2012,36 +2415,16 @@ function renderPrintReport() {
     return `<tr>${cells.join("")}</tr>`;
   }).join("");
 
-  const daySummary = DAYS.map((day) => `${day.short}: ${formatNumber(summary.dayTotals[day.key])}h`).join(" | ");
-  const employeeSummary = summary.employees
-    .map((item) => `${escapeHtml(displayEmployeeName(item.employee))}: ${formatNumber(item.total)}h`)
-    .join("<br>");
-
   els.printArea.innerHTML = `
     <h1>Weekly Hours Report</h1>
     <div>${escapeHtml(getWeekRangeLabel())}</div>
-    <div class="print-meta">
-      <div class="print-box"><strong>Week start</strong>${weekStartKey}</div>
-      <div class="print-box"><strong>Week end</strong>${weekEndKey}</div>
-      <div class="print-box"><strong>Threshold</strong>${formatNumber(getThreshold())} hours</div>
-      <div class="print-box"><strong>Employees</strong>${state.employees.length}</div>
-    </div>
-    <div class="print-summary">
-      <div class="print-box"><strong>Combined hours</strong>${formatNumber(summary.combinedTotal)}h</div>
-      <div class="print-box"><strong>Active employees</strong>${summary.activeCount}</div>
-      <div class="print-box"><strong>Over threshold</strong>${summary.overThreshold.length}</div>
-      <div class="print-box"><strong>Missing entries</strong>${summary.missingEntries.length}</div>
-      <div class="print-box"><strong>Empty weeks</strong>${summary.emptyWeeks.length}</div>
-    </div>
-    <div class="print-box"><strong>Total hours per day</strong>${escapeHtml(daySummary)}</div>
-    <div class="print-box"><strong>Total hours per employee</strong>${employeeSummary || "No employees"}</div>
     <table class="print-table">
       <thead>
         <tr>
           <th>Employee</th>
-          <th>Company/group</th>
-          <th>Role/note</th>
-          ${DAYS.map((day) => `<th>${day.short}<br>hours and notes</th>`).join("")}
+          <th>Group</th>
+          <th>Note</th>
+          ${DAYS.map((day) => `<th>${day.label}</th>`).join("")}
           <th>Total</th>
           <th>Warning status</th>
         </tr>
@@ -2084,7 +2467,7 @@ function importBackup(event) {
       dailySearchQuery = "";
       expandedEmployeeId = state.lastExpandedEmployeeId || null;
       expandedDailyEmployeeId = state.lastExpandedDailyEmployeeId || null;
-      quickFill.employeeId = state.employees[0]?.id || "";
+      quickFill.employeeId = getActiveEmployees()[0]?.id || "";
       saveState();
       renderApp();
       showDataNotice("Backup imported.");
@@ -2157,6 +2540,8 @@ function normalizeState(input, strict) {
     throw new Error("Invalid threshold");
   }
 
+  const noteTemplates = normalizeNoteTemplates(input.noteTemplates, strict);
+
   const selectedWeek = typeof input.selectedWeekStart === "string" && isDateKey(input.selectedWeekStart)
     ? toDateKey(startOfWeek(parseDateKey(input.selectedWeekStart)))
     : toDateKey(startOfWeek(new Date()));
@@ -2165,6 +2550,7 @@ function normalizeState(input, strict) {
     employees,
     weeks,
     threshold: Number.isFinite(threshold) && threshold >= 0 ? threshold : DEFAULT_THRESHOLD,
+    noteTemplates,
     selectedWeekStart: selectedWeek,
     lastTab: normalizeTab(input.lastTab),
     lastDailyDayKey: isDayKey(input.lastDailyDayKey) ? input.lastDailyDayKey : getTodayDayKeyForWeek(parseDateKey(selectedWeek) || startOfWeek(new Date())) || "monday",
@@ -2180,7 +2566,8 @@ function normalizeEmployee(employee) {
     id: typeof employee.id === "string" && employee.id ? employee.id : createId(),
     name: typeof employee.name === "string" ? employee.name : "",
     group: typeof employee.group === "string" ? employee.group : typeof employee.company === "string" ? employee.company : "",
-    role: typeof employee.role === "string" ? employee.role : ""
+    role: typeof employee.role === "string" ? employee.role : "",
+    archivedAt: typeof employee.archivedAt === "string" ? employee.archivedAt : employee.archived ? new Date().toISOString() : ""
   };
 }
 
@@ -2203,7 +2590,47 @@ function normalizeWeek(week, strict) {
     entries[employeeId] = normalizeEntry(entry, strict);
   });
 
-  return { entries };
+  const dayReviews = createEmptyDayReviews();
+  const sourceReviews = week.dayReviews && typeof week.dayReviews === "object" && !Array.isArray(week.dayReviews)
+    ? week.dayReviews
+    : {};
+
+  if (strict && week.dayReviews !== undefined && sourceReviews !== week.dayReviews) {
+    throw new Error("Invalid day reviews");
+  }
+
+  DAYS.forEach((day) => {
+    const source = sourceReviews[day.key] || {};
+    if (strict && sourceReviews[day.key] !== undefined && (typeof source !== "object" || Array.isArray(source))) {
+      throw new Error("Invalid day review");
+    }
+    dayReviews[day.key] = {
+      signed: Boolean(source.signed),
+      signedAt: typeof source.signedAt === "string" ? source.signedAt : ""
+    };
+  });
+
+  return { entries, dayReviews };
+}
+
+function normalizeNoteTemplates(value, strict) {
+  if (value === undefined) return DEFAULT_NOTE_TEMPLATES.slice();
+  if (!Array.isArray(value)) {
+    if (strict) throw new Error("Invalid note templates");
+    return DEFAULT_NOTE_TEMPLATES.slice();
+  }
+
+  const unique = [];
+  value.forEach((item) => {
+    if (typeof item !== "string") {
+      if (strict) throw new Error("Invalid note template");
+      return;
+    }
+    const template = item.trim();
+    if (!template || unique.some((existing) => existing.toLowerCase() === template.toLowerCase())) return;
+    unique.push(template);
+  });
+  return unique;
 }
 
 function normalizeEntry(entry, strict) {
@@ -2241,6 +2668,7 @@ function getDefaultState() {
     employees: [],
     weeks: {},
     threshold: DEFAULT_THRESHOLD,
+    noteTemplates: DEFAULT_NOTE_TEMPLATES.slice(),
     selectedWeekStart: toDateKey(thisWeek),
     lastTab: "today",
     lastDailyDayKey: getTodayDayKeyForWeek(thisWeek) || "monday",
@@ -2252,7 +2680,7 @@ function getDefaultState() {
 
 function ensureCurrentWeekEntries() {
   const week = getWeek();
-  state.employees.forEach((employee) => {
+  getActiveEmployees().forEach((employee) => {
     week.entries[employee.id] = normalizeEntry(week.entries[employee.id], false);
   });
 }
@@ -2260,8 +2688,9 @@ function ensureCurrentWeekEntries() {
 function getWeek() {
   const weekKey = getWeekKey();
   if (!state.weeks[weekKey]) {
-    state.weeks[weekKey] = { entries: {} };
+    state.weeks[weekKey] = { entries: {}, dayReviews: createEmptyDayReviews() };
   }
+  state.weeks[weekKey] = normalizeWeek(state.weeks[weekKey], false);
   return state.weeks[weekKey];
 }
 
@@ -2273,8 +2702,32 @@ function getEmployeeEntry(employeeId) {
   return week.entries[employeeId];
 }
 
+function getDayReview(dayKey) {
+  const week = getWeek();
+  if (!week.dayReviews[dayKey]) {
+    week.dayReviews[dayKey] = { signed: false, signedAt: "" };
+  }
+  return week.dayReviews[dayKey];
+}
+
+function clearDayReview(dayKey) {
+  if (!isDayKey(dayKey)) return;
+  const review = getDayReview(dayKey);
+  if (!review.signed && !review.signedAt) return;
+  review.signed = false;
+  review.signedAt = "";
+}
+
+function clearDayReviews(dayKeys) {
+  dayKeys.forEach(clearDayReview);
+}
+
 function createEmptyDays() {
   return Object.fromEntries(DAYS.map((day) => [day.key, { hours: "", note: "" }]));
+}
+
+function createEmptyDayReviews() {
+  return Object.fromEntries(DAYS.map((day) => [day.key, { signed: false, signedAt: "" }]));
 }
 
 function getThreshold() {
@@ -2404,6 +2857,12 @@ function formatShortDate(date) {
 function formatNumber(value) {
   const number = Number(value) || 0;
   return Number.isInteger(number) ? String(number) : number.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function formatSignedTime(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function displayEmployeeName(employee) {

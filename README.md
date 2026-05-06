@@ -8,23 +8,25 @@ Open `index.html` in a browser. The app starts on Today because the fastest dail
 
 1. Pick the date.
 2. Use All Off, All 5h, or All 10h when everyone worked the same pattern.
-3. Adjust individual people with Off, 5h, 10h, +1, or -1.
-4. Open notes only for the rows that need them.
+3. Use the group Off, 5h, or 10h buttons when one subcontractor or crew has the same day.
+4. Adjust individual people with Off, 5h, 10h, +1, or -1.
+5. Open notes only for the rows that need them.
+6. Sign off the day when it has been reviewed.
 
-The Today screen shows the selected date, daily progress, and a compact roster. It avoids the large all-week table so a supervisor can fill the day with minimal scrolling.
+The Today screen shows the selected date, daily progress, and a compact roster. It avoids the large all-week table so a supervisor can fill the day with minimal scrolling. Roster groups are collapsible, which helps keep subcontractor or crew lists short on a phone.
 
 ## Sections
 
 - Today: daily entry for the selected date.
 - Week: weekly totals, warnings, CSV export, PDF/print export, and collapsed weekly tools.
-- People: add, edit, and delete employees.
-- Settings: threshold, backup, restore, and clear tools.
+- People: add, edit, archive, and restore employees.
+- Settings: threshold, note templates, backup, restore, and clear tools.
 
 On phones, use the sticky bottom navigation. On desktop, the same sections appear in a compact top navigation.
 
 ## Add employees
 
-On a phone, tap `+ Person` to open the add employee sheet. Enter a name, optionally add a company or group, optionally add a role or note, and tap Add person. The same add form is also available in People inside the collapsed Add employee section.
+On a phone, tap `+ Person` to open the add employee sheet. Enter a name, optionally add a company or group, optionally add a role or note, and tap Add person. After a group exists, the add forms show tappable existing-group chips and the People edit fields suggest saved groups, so the same group can be selected instead of typed again.
 
 Employees stay available every week. Their hours and daily notes are stored separately for each Monday to Sunday week.
 
@@ -35,9 +37,12 @@ Today includes frequent supervisor shortcuts:
 - All Off: sets everyone on the selected date to 0 hours.
 - All 5h: sets everyone on the selected date to 5 hours.
 - All 10h: sets everyone on the selected date to 10 hours.
+- Group Off, 5h, and 10h: sets only that collapsible company/group section for the selected date.
 - Custom or selected people: apply one custom value to everyone or only chosen people.
 - Copy yesterday: copies the previous day's hours and notes into the selected date when previous-day data exists.
+- Sign off day: marks the selected date as reviewed. Editing hours or notes for that day removes the sign-off so it can be reviewed again.
 - Roster tools: search by name, company/group, or role, filter to All, Needs entry, or Entered, and jump to the first missing or invalid row.
+- Collapsible company/group headings: open only the crew or subcontractor you are filling right now.
 
 Each employee row includes:
 
@@ -46,11 +51,12 @@ Each employee row includes:
 - Off, 5h, and 10h buttons.
 - +1 and -1 buttons. Hours never go below 0.
 - Collapsed note field opened with Add note or Edit note.
+- Note template chips, including saved templates such as Rain delay and Left early.
 - Compact status badges: Missing, Entered, or Invalid.
 
 ## Weekly tools
 
-Open Week to review the core metrics. Daily totals, employee totals, warnings, exports, and Week tools are collapsed so the screen stays short on mobile.
+Open Week to review the core metrics. Daily totals, employee totals, warnings, overtime review, exports, and Week tools are collapsed so the screen stays short on mobile.
 
 Expand Week tools for less common weekly actions:
 
@@ -60,9 +66,19 @@ Expand Week tools for less common weekly actions:
 
 Employee week panels include Full Week 10h, Half Week 5h, Clear Week, Copy Previous Week, and Apply Same Hours.
 
+The Overtime review section shows only employees over the weekly threshold, with their total, hours over threshold, and day-by-day breakdown.
+
+## Archive and restore
+
+Use People to archive employees who should no longer appear in the daily roster. Archived employees keep their saved hours and notes, remain in backups, and still appear in reports for weeks where they have data. Open Archived employees in People to restore someone.
+
+## Note templates
+
+Settings includes saved note templates. Add common notes there, or open a note on a daily row and use Save note as template. Templates appear as one-tap chips whenever a note field is open.
+
 ## Week-to-week memory
 
-The selected week, selected day, active section, roster filter, expanded employee, employees, employee groups, threshold, hours, and notes are saved in `localStorage` under `weeklyHoursTracker:v1`. Data persists after refreshes on the same browser and device.
+The selected week, selected day, active section, roster filter, expanded employee, employees, archived employees, employee groups, threshold, daily sign-offs, note templates, hours, and notes are saved in `localStorage` under `weeklyHoursTracker:v1`. Data persists after refreshes on the same browser and device.
 
 If browser storage is empty or unreadable, the app starts with a clean tracker instead of crashing.
 
@@ -74,7 +90,7 @@ CSV values are escaped for commas, quotes, and line breaks. The filename uses `w
 
 ## PDF export
 
-Go to Week, expand Export report, and tap PDF / Print. The app uses the browser print dialog with a clean weekly report layout. Choose Save as PDF in the print dialog to create a PDF.
+Go to Week, expand Export report, and tap PDF / Print. The app uses the browser print dialog with a clean table-only weekly report. Choose Save as PDF in the print dialog to create a PDF.
 
 ## Backup and restore
 

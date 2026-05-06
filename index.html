@@ -58,6 +58,10 @@
                 <p id="dailyProgress" class="daily-progress"></p>
               </div>
               <div id="dailyDayButtons" class="segmented-grid daily-days" role="group" aria-label="Choose daily log date"></div>
+              <div class="daily-review-row">
+                <span id="dailyReviewStatus" class="review-status">Not signed off</span>
+                <button type="button" class="button secondary" id="dailySignOff">Sign off day</button>
+              </div>
             </div>
 
             <div class="daily-set-all">
@@ -165,6 +169,14 @@
 
           <details class="tool-details screen-only">
             <summary>
+              <span>Overtime review</span>
+              <span id="overtimeMeta" class="summary-meta">0 people</span>
+            </summary>
+            <div id="overtimeReview" class="overtime-review"></div>
+          </details>
+
+          <details class="tool-details screen-only">
+            <summary>
               <span>Export report</span>
               <span class="summary-meta">CSV and PDF</span>
             </summary>
@@ -266,7 +278,7 @@
             <div>
               <p class="section-kicker">Employees</p>
               <h2 id="peopleHeading">People</h2>
-              <p>Add, edit, or remove employees. Hours are stored separately by week.</p>
+              <p>Add, edit, archive, or restore employees. Hours are stored separately by week.</p>
             </div>
           </div>
 
@@ -286,8 +298,9 @@
                 </label>
                 <label for="employeeGroup">
                   Company or group
-                  <input id="employeeGroup" name="employeeGroup" type="text" autocomplete="off">
+                  <input id="employeeGroup" name="employeeGroup" type="text" autocomplete="off" list="employeeGroupOptions">
                 </label>
+                <div id="employeeGroupChoices" class="group-choice-list is-hidden" aria-label="Existing groups"></div>
                 <label for="employeeRole">
                   Role or note
                   <input id="employeeRole" name="employeeRole" type="text" autocomplete="off">
@@ -317,6 +330,21 @@
                 Weekly threshold
                 <input id="thresholdInput" type="number" min="0" step="0.25" inputmode="decimal">
               </label>
+            </section>
+          </details>
+
+          <details class="tool-details screen-only">
+            <summary>
+              <span>Note templates</span>
+              <span class="summary-meta">Saved notes</span>
+            </summary>
+            <section class="panel settings-panel">
+              <label for="noteTemplateInput">
+                New template
+                <input id="noteTemplateInput" type="text" autocomplete="off" placeholder="Rain delay">
+              </label>
+              <button type="button" class="button primary" id="addNoteTemplate">Add template</button>
+              <div id="noteTemplateList" class="template-list"></div>
             </section>
           </details>
 
@@ -370,8 +398,9 @@
         </label>
         <label for="modalEmployeeGroup">
           Company or group
-          <input id="modalEmployeeGroup" name="modalEmployeeGroup" type="text" autocomplete="off">
+          <input id="modalEmployeeGroup" name="modalEmployeeGroup" type="text" autocomplete="off" list="employeeGroupOptions">
         </label>
+        <div id="modalEmployeeGroupChoices" class="group-choice-list is-hidden" aria-label="Existing groups"></div>
         <label for="modalEmployeeRole">
           Role or note
           <input id="modalEmployeeRole" name="modalEmployeeRole" type="text" autocomplete="off">
@@ -382,6 +411,8 @@
         </div>
       </form>
     </dialog>
+
+    <datalist id="employeeGroupOptions"></datalist>
 
     <script src="app.js" defer></script>
   </body>
