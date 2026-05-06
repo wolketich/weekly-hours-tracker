@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Weekly Hours Tracker icon">
+  <rect width="512" height="512" fill="#2563eb"/>
+  <rect x="92" y="104" width="328" height="304" rx="44" fill="#ffffff"/>
+  <rect x="92" y="104" width="328" height="84" rx="44" fill="#dbeafe"/>
+  <rect x="142" y="232" width="66" height="56" rx="15" fill="#2563eb"/>
+  <rect x="223" y="232" width="66" height="56" rx="15" fill="#93c5fd"/>
+  <rect x="304" y="232" width="66" height="56" rx="15" fill="#93c5fd"/>
+  <rect x="142" y="307" width="66" height="56" rx="15" fill="#93c5fd"/>
+  <rect x="223" y="307" width="66" height="56" rx="15" fill="#93c5fd"/>
+  <path d="M318 364l72-82 31 27-101 115-70-70 30-29 38 39z" fill="#16a34a"/>
+</svg>

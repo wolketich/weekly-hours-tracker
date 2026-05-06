@@ -3,31 +3,30 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#ffffff">
+    <meta name="theme-color" content="#f7f8fa">
+    <meta name="description" content="A local weekly hours tracker for daily supervisor entry.">
     <title>Weekly Hours Tracker</title>
-    <link rel="stylesheet" href="styles.css">
     <link rel="manifest" href="manifest.webmanifest">
-    <link rel="apple-touch-icon" href="icons/icon-192.png">
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-title" content="Hours Tracker">
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="icons/icon.svg">
+    <link rel="stylesheet" href="styles.css">
   </head>
   <body>
     <div class="app-shell">
       <header class="app-header screen-only">
         <div class="title-block">
-          <p class="eyebrow">Local weekly timesheet</p>
+          <p class="eyebrow">Local timesheet</p>
           <h1>Weekly Hours Tracker</h1>
         </div>
         <div id="saveStatus" class="save-status" role="status" aria-live="polite">Ready</div>
       </header>
 
       <nav class="app-nav screen-only" aria-label="Main sections">
-        <button type="button" data-tab="log" class="nav-tab is-active">
-          <span>Log</span>
+        <button type="button" data-tab="today" class="nav-tab is-active">
+          <span>Today</span>
         </button>
-        <button type="button" data-tab="summary" class="nav-tab">
-          <span>Summary</span>
+        <button type="button" data-tab="week" class="nav-tab">
+          <span>Week</span>
         </button>
         <button type="button" data-tab="people" class="nav-tab">
           <span>People</span>
@@ -38,161 +37,72 @@
       </nav>
 
       <main>
-        <section id="view-log" class="view is-active" data-view="log" aria-labelledby="logHeading">
-          <div class="week-strip screen-only">
+        <section id="view-today" class="view is-active" data-view="today" aria-labelledby="todayHeading">
+          <div class="day-strip screen-only">
             <div>
-              <p class="section-kicker">Selected week</p>
-              <h2 id="logHeading">Log hours</h2>
-              <p id="weekRangeLog" class="week-range"></p>
+              <p class="section-kicker">Daily entry</p>
+              <h2 id="todayHeading">Today</h2>
+              <p id="dailyDateLabel" class="daily-date-label"></p>
+              <p id="weekRangeLog" class="week-range compact"></p>
             </div>
-            <div class="week-actions" aria-label="Week controls">
-              <button type="button" class="button secondary" data-week-action="previous">Previous week</button>
-              <button type="button" class="button secondary" data-week-action="current">Current week</button>
-              <button type="button" class="button secondary" data-week-action="next">Next week</button>
-            </div>
-          </div>
-
-          <section class="summary-mini screen-only" aria-label="Weekly snapshot">
-            <div>
-              <span>Total</span>
-              <strong id="miniTotal">0h</strong>
-            </div>
-            <div>
-              <span>Active</span>
-              <strong id="miniActive">0</strong>
-            </div>
-            <div>
-              <span>Warnings</span>
-              <strong id="miniWarnings">0</strong>
-            </div>
-          </section>
-
-          <section class="panel daily-log-card screen-only" aria-labelledby="dailyLogHeading">
-            <div class="panel-heading">
-              <div>
-                <p class="section-kicker">Daily entry</p>
-                <h2 id="dailyLogHeading">Daily Log</h2>
-                <p id="dailyDateLabel" class="daily-date-label"></p>
-              </div>
-            </div>
-
             <div class="daily-date-controls" aria-label="Daily date controls">
               <button type="button" class="button secondary" data-daily-day-action="previous">Previous day</button>
               <button type="button" class="button secondary" data-daily-day-action="today">Today</button>
               <button type="button" class="button secondary" data-daily-day-action="next">Next day</button>
             </div>
+          </div>
 
-            <div id="dailyDayButtons" class="segmented-grid daily-days" role="group" aria-label="Choose daily log date"></div>
-
-            <div class="daily-set-all">
+          <section class="daily-workspace screen-only" aria-labelledby="dailyRosterHeading">
+            <div class="daily-status">
               <div>
-                <span class="mini-label">Set everyone for this date</span>
+                <span class="mini-label">Daily progress</span>
                 <p id="dailyProgress" class="daily-progress"></p>
               </div>
-              <div class="daily-set-actions">
-                <button type="button" class="button secondary" data-daily-all="0">All Off</button>
-                <button type="button" class="button secondary" data-daily-all="5">All Half 5h</button>
-                <button type="button" class="button secondary" data-daily-all="10">All Full 10h</button>
-              </div>
-              <div class="daily-custom-all">
-                <label for="dailyAllCustom">
-                  Custom hours
-                  <input id="dailyAllCustom" type="number" min="0" step="0.25" inputmode="decimal">
-                </label>
-                <button type="button" class="button primary" id="dailyApplyCustom">Apply custom to everyone</button>
-              </div>
+              <div id="dailyDayButtons" class="segmented-grid daily-days" role="group" aria-label="Choose daily log date"></div>
             </div>
 
+            <div class="daily-set-all">
+              <div class="daily-set-actions">
+                <button type="button" class="button secondary" data-daily-all="0">All Off</button>
+                <button type="button" class="button secondary" data-daily-all="5">All 5h</button>
+                <button type="button" class="button primary" data-daily-all="10">All 10h</button>
+              </div>
+              <details class="tool-details compact-tools">
+                <summary>Custom or selected people</summary>
+                <div class="daily-custom-all">
+                  <label for="dailyAllCustom">
+                    Custom hours
+                    <input id="dailyAllCustom" type="number" min="0" step="0.25" inputmode="decimal">
+                  </label>
+                  <button type="button" class="button primary" id="dailyApplyCustom">Apply custom to everyone</button>
+                </div>
+                <button type="button" class="button secondary full-width" id="dailyCopyYesterday">Copy yesterday</button>
+                <div class="choose-people-panel">
+                  <span class="mini-label">Choose people</span>
+                  <div id="dailyPeopleActions" class="segmented-grid people-actions" role="group" aria-label="Daily people mode"></div>
+                  <div id="dailyPeopleList" class="bulk-people-list"></div>
+                  <div class="daily-custom-all">
+                    <label for="dailySelectedCustom">
+                      Hours for selected
+                      <input id="dailySelectedCustom" type="number" min="0" step="0.25" inputmode="decimal">
+                    </label>
+                    <button type="button" class="button primary" id="dailyApplySelected">Apply to selected</button>
+                  </div>
+                </div>
+              </details>
+            </div>
+
+            <h2 id="dailyRosterHeading" class="sr-only">Daily employee roster</h2>
             <div id="dailyRoster" class="daily-roster"></div>
             <p id="dailyNotice" class="inline-notice" role="status" aria-live="polite"></p>
           </section>
-
-          <section class="panel quick-fill-card screen-only" aria-labelledby="quickFillHeading">
-            <div class="panel-heading">
-              <div>
-                <p class="section-kicker">Fast entry</p>
-                <h2 id="quickFillHeading">Quick Fill</h2>
-              </div>
-            </div>
-
-            <div class="quick-fill-grid">
-              <label for="quickEmployee">
-                Employee
-                <select id="quickEmployee"></select>
-              </label>
-
-              <div class="field-group">
-                <span>Preset</span>
-                <div id="quickPresetButtons" class="segmented-grid" role="group" aria-label="Quick Fill preset"></div>
-              </div>
-
-              <label id="quickCustomWrap" class="is-hidden" for="quickCustomHours">
-                Custom hours
-                <input id="quickCustomHours" type="number" min="0" step="0.25" inputmode="decimal">
-              </label>
-
-              <div class="field-group quick-days">
-                <span>Days</span>
-                <div id="quickDayButtons" class="segmented-grid days" role="group" aria-label="Quick Fill days"></div>
-              </div>
-            </div>
-
-            <button type="button" class="button primary full-width" id="quickApply">Apply Quick Fill</button>
-            <p id="quickFillNotice" class="inline-notice" role="status" aria-live="polite"></p>
-          </section>
-
-          <section class="panel bulk-fill-card screen-only" aria-labelledby="bulkFillHeading">
-            <div class="panel-heading">
-              <div>
-                <p class="section-kicker">Batch entry</p>
-                <h2 id="bulkFillHeading">Bulk Fill</h2>
-                <p>Apply the same hours to several people for today, selected days, or a whole week group.</p>
-              </div>
-            </div>
-
-            <div class="bulk-fill-grid">
-              <div class="field-group people-picker">
-                <span>People</span>
-                <div id="bulkPeopleActions" class="segmented-grid people-actions" role="group" aria-label="Bulk Fill people mode"></div>
-                <div id="bulkPeopleList" class="bulk-people-list"></div>
-              </div>
-
-              <div class="field-group">
-                <span>Preset</span>
-                <div id="bulkPresetButtons" class="segmented-grid" role="group" aria-label="Bulk Fill preset"></div>
-              </div>
-
-              <label id="bulkCustomWrap" class="is-hidden" for="bulkCustomHours">
-                Custom hours
-                <input id="bulkCustomHours" type="number" min="0" step="0.25" inputmode="decimal">
-              </label>
-
-              <div class="field-group bulk-days">
-                <span>Days</span>
-                <div id="bulkDayButtons" class="segmented-grid days" role="group" aria-label="Bulk Fill days"></div>
-              </div>
-            </div>
-
-            <button type="button" class="button primary full-width" id="bulkApply">Apply to selected people</button>
-            <p id="bulkFillNotice" class="inline-notice" role="status" aria-live="polite"></p>
-          </section>
-
-          <section class="employee-log-section screen-only" aria-labelledby="employeeLogHeading">
-            <div class="section-title-row">
-              <div>
-                <h2 id="employeeLogHeading">Employees</h2>
-                <p>Tap one employee to open Monday to Sunday entry.</p>
-              </div>
-            </div>
-            <div id="logEmployeeList" class="employee-stack"></div>
-          </section>
         </section>
 
-        <section id="view-summary" class="view" data-view="summary" aria-labelledby="summaryHeading">
+        <section id="view-week" class="view" data-view="week" aria-labelledby="weekHeading">
           <div class="week-strip screen-only">
             <div>
               <p class="section-kicker">Selected week</p>
-              <h2 id="summaryHeading">Summary</h2>
+              <h2 id="weekHeading">Week</h2>
               <p id="weekRangeSummary" class="week-range"></p>
             </div>
             <div class="week-actions" aria-label="Week controls">
@@ -227,6 +137,89 @@
             <button type="button" class="button primary" id="exportCsv">CSV</button>
             <button type="button" class="button secondary" id="printReport">PDF / Print</button>
           </div>
+
+          <details class="tool-details screen-only">
+            <summary>Week tools</summary>
+            <section class="panel quick-fill-card" aria-labelledby="quickFillHeading">
+              <div class="panel-heading">
+                <div>
+                  <p class="section-kicker">Fast entry</p>
+                  <h2 id="quickFillHeading">Quick Fill</h2>
+                </div>
+              </div>
+
+              <div class="quick-fill-grid">
+                <label for="quickEmployee">
+                  Employee
+                  <select id="quickEmployee"></select>
+                </label>
+
+                <div class="field-group">
+                  <span>Preset</span>
+                  <div id="quickPresetButtons" class="segmented-grid" role="group" aria-label="Quick Fill preset"></div>
+                </div>
+
+                <label id="quickCustomWrap" class="is-hidden" for="quickCustomHours">
+                  Custom hours
+                  <input id="quickCustomHours" type="number" min="0" step="0.25" inputmode="decimal">
+                </label>
+
+                <div class="field-group quick-days">
+                  <span>Days</span>
+                  <div id="quickDayButtons" class="segmented-grid days" role="group" aria-label="Quick Fill days"></div>
+                </div>
+              </div>
+
+              <button type="button" class="button primary full-width" id="quickApply">Apply Quick Fill</button>
+              <p id="quickFillNotice" class="inline-notice" role="status" aria-live="polite"></p>
+            </section>
+
+            <section class="panel bulk-fill-card" aria-labelledby="bulkFillHeading">
+              <div class="panel-heading">
+                <div>
+                  <p class="section-kicker">Batch entry</p>
+                  <h2 id="bulkFillHeading">Bulk Fill</h2>
+                  <p>Apply the same hours to several people for selected days or a whole week group.</p>
+                </div>
+              </div>
+
+              <div class="bulk-fill-grid">
+                <div class="field-group people-picker">
+                  <span>People</span>
+                  <div id="bulkPeopleActions" class="segmented-grid people-actions" role="group" aria-label="Bulk Fill people mode"></div>
+                  <div id="bulkPeopleList" class="bulk-people-list"></div>
+                </div>
+
+                <div class="field-group">
+                  <span>Preset</span>
+                  <div id="bulkPresetButtons" class="segmented-grid" role="group" aria-label="Bulk Fill preset"></div>
+                </div>
+
+                <label id="bulkCustomWrap" class="is-hidden" for="bulkCustomHours">
+                  Custom hours
+                  <input id="bulkCustomHours" type="number" min="0" step="0.25" inputmode="decimal">
+                </label>
+
+                <div class="field-group bulk-days">
+                  <span>Days</span>
+                  <div id="bulkDayButtons" class="segmented-grid days" role="group" aria-label="Bulk Fill days"></div>
+                </div>
+              </div>
+
+              <button type="button" class="button primary full-width" id="bulkApply">Apply to selected people</button>
+              <p id="bulkFillNotice" class="inline-notice" role="status" aria-live="polite"></p>
+            </section>
+
+            <section class="employee-log-section" aria-labelledby="employeeLogHeading">
+              <div class="section-title-row">
+                <div>
+                  <h2 id="employeeLogHeading">Employee week panels</h2>
+                  <p>Open one employee when you need to adjust a full week.</p>
+                </div>
+              </div>
+              <div id="logEmployeeList" class="employee-stack"></div>
+            </section>
+          </details>
         </section>
 
         <section id="view-people" class="view" data-view="people" aria-labelledby="peopleHeading">
@@ -265,29 +258,35 @@
             </div>
           </div>
 
-          <section class="panel settings-panel screen-only">
-            <label for="thresholdInput">
-              Weekly threshold
-              <input id="thresholdInput" type="number" min="0" step="0.25" inputmode="decimal">
-            </label>
-          </section>
-
-          <section class="panel data-panel screen-only" aria-labelledby="dataHeading">
-            <div>
-              <h3 id="dataHeading">Backup and clear data</h3>
-              <p>Backup and restore replace only this tracker data in this browser.</p>
-            </div>
-            <div class="data-actions">
-              <button type="button" class="button secondary" id="clearWeek">Clear selected week's hours</button>
-              <button type="button" class="button danger" id="clearAllData">Clear all data</button>
-              <button type="button" class="button secondary" id="exportBackup">Export JSON backup</button>
-              <label class="button secondary file-button" for="importBackup">
-                Import JSON backup
-                <input id="importBackup" type="file" accept="application/json">
+          <details class="tool-details screen-only" open>
+            <summary>Work rules</summary>
+            <section class="panel settings-panel">
+              <label for="thresholdInput">
+                Weekly threshold
+                <input id="thresholdInput" type="number" min="0" step="0.25" inputmode="decimal">
               </label>
-            </div>
-            <p id="dataNotice" class="inline-notice" role="status" aria-live="polite"></p>
-          </section>
+            </section>
+          </details>
+
+          <details class="tool-details screen-only">
+            <summary>Backup and clear data</summary>
+            <section class="panel data-panel" aria-labelledby="dataHeading">
+              <div>
+                <h3 id="dataHeading">Backup and clear data</h3>
+                <p>Backup and restore replace only this tracker data in this browser.</p>
+              </div>
+              <div class="data-actions">
+                <button type="button" class="button secondary" id="clearWeek">Clear selected week's hours</button>
+                <button type="button" class="button danger" id="clearAllData">Clear all data</button>
+                <button type="button" class="button secondary" id="exportBackup">Export JSON backup</button>
+                <label class="button secondary file-button" for="importBackup">
+                  Import JSON backup
+                  <input id="importBackup" type="file" accept="application/json">
+                </label>
+              </div>
+              <p id="dataNotice" class="inline-notice" role="status" aria-live="polite"></p>
+            </section>
+          </details>
         </section>
 
         <section id="printArea" class="print-report" aria-label="Printable weekly report"></section>

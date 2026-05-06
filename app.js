@@ -1,18 +1,8 @@
 "use strict";
 
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker
-      .register("./sw.js")
-      .catch((error) => {
-        console.error("Service worker registration failed:", error);
-      });
-  });
-}
-
 const STORAGE_KEY = "weeklyHoursTracker:v1";
 const DEFAULT_THRESHOLD = 40;
-const VALID_TABS = ["log", "summary", "people", "settings"];
+const VALID_TABS = ["today", "week", "people", "settings"];
 
 const DAYS = [
   { key: "monday", label: "Monday", short: "Mon" },
@@ -55,7 +45,7 @@ const MONTH_NAMES = [
 const els = {};
 let state = loadState();
 let selectedWeekStart = parseDateKey(state.selectedWeekStart) || startOfWeek(new Date());
-let activeTab = VALID_TABS.includes(state.lastTab) ? state.lastTab : "log";
+let activeTab = normalizeTab(state.lastTab);
 let selectedDailyDayKey = isDayKey(state.lastDailyDayKey) ? state.lastDailyDayKey : getDefaultDailyDayKey();
 let expandedEmployeeId = state.lastExpandedEmployeeId || null;
 let saveTimer = null;
@@ -76,6 +66,10 @@ const bulkFill = {
   customHours: "",
   days: new Set(getDefaultBulkDays())
 };
+const dailyPeopleFill = {
+  applyAll: false,
+  employeeIds: new Set()
+};
 
 document.addEventListener("DOMContentLoaded", init);
 
@@ -83,6 +77,16 @@ function init() {
   cacheElements();
   bindEvents();
   renderApp();
+  registerServiceWorker();
+}
+
+function registerServiceWorker() {
+  const isHttp = window.location.protocol === "http:" || window.location.protocol === "https:";
+  if (!isHttp || !("serviceWorker" in navigator)) return;
+
+  navigator.serviceWorker.register("./service-worker.js").catch(() => {
+    // The app remains usable if offline caching is unavailable.
+  });
 }
 
 function cacheElements() {
@@ -93,15 +97,17 @@ function cacheElements() {
     document.getElementById("weekRangeLog"),
     document.getElementById("weekRangeSummary")
   ];
-  els.miniTotal = document.getElementById("miniTotal");
-  els.miniActive = document.getElementById("miniActive");
-  els.miniWarnings = document.getElementById("miniWarnings");
   els.quickEmployee = document.getElementById("quickEmployee");
   els.dailyDateLabel = document.getElementById("dailyDateLabel");
   els.dailyDayButtons = document.getElementById("dailyDayButtons");
   els.dailyProgress = document.getElementById("dailyProgress");
   els.dailyAllCustom = document.getElementById("dailyAllCustom");
   els.dailyApplyCustom = document.getElementById("dailyApplyCustom");
+  els.dailyCopyYesterday = document.getElementById("dailyCopyYesterday");
+  els.dailyPeopleActions = document.getElementById("dailyPeopleActions");
+  els.dailyPeopleList = document.getElementById("dailyPeopleList");
+  els.dailySelectedCustom = document.getElementById("dailySelectedCustom");
+  els.dailyApplySelected = document.getElementById("dailyApplySelected");
   els.dailyRoster = document.getElementById("dailyRoster");
   els.dailyNotice = document.getElementById("dailyNotice");
   els.quickPresetButtons = document.getElementById("quickPresetButtons");
@@ -170,6 +176,16 @@ function bindEvents() {
     }
   });
   els.dailyApplyCustom.addEventListener("click", applyDailyCustomToEveryone);
+  els.dailyCopyYesterday.addEventListener("click", copyYesterdayToSelectedDay);
+  els.dailyPeopleActions.addEventListener("click", handleDailyPeopleAction);
+  els.dailyPeopleList.addEventListener("change", handleDailyPersonChange);
+  els.dailySelectedCustom.addEventListener("keydown", blockInvalidNumberKeys);
+  els.dailySelectedCustom.addEventListener("input", () => {
+    if (els.dailySelectedCustom.value.startsWith("-")) {
+      els.dailySelectedCustom.value = "";
+    }
+  });
+  els.dailyApplySelected.addEventListener("click", applyDailyCustomToSelectedPeople);
   els.dailyRoster.addEventListener("click", handleDailyRosterClick);
   els.dailyRoster.addEventListener("input", handleDailyRosterInput);
   els.dailyRoster.addEventListener("keydown", handleDailyRosterKeydown);
@@ -234,7 +250,6 @@ function renderApp() {
   keepUiStateValid();
   updateActiveView();
   updateWeekLabels();
-  renderMiniSummary();
   renderDailyLog();
   renderQuickFill();
   renderBulkFill();
@@ -255,6 +270,9 @@ function keepUiStateValid() {
   if (!quickFill.employeeId || !state.employees.some((employee) => employee.id === quickFill.employeeId)) {
     quickFill.employeeId = state.employees[0]?.id || "";
   }
+  dailyPeopleFill.employeeIds = new Set(
+    Array.from(dailyPeopleFill.employeeIds).filter((employeeId) => state.employees.some((employee) => employee.id === employeeId))
+  );
   bulkFill.employeeIds = new Set(
     Array.from(bulkFill.employeeIds).filter((employeeId) => state.employees.some((employee) => employee.id === employeeId))
   );
@@ -277,6 +295,12 @@ function updateActiveView() {
   els.fabAddEmployee.classList.toggle("is-hidden", activeTab === "people");
 }
 
+function normalizeTab(tab) {
+  if (tab === "log") return "today";
+  if (tab === "summary") return "week";
+  return VALID_TABS.includes(tab) ? tab : "today";
+}
+
 function updateWeekLabels() {
   const label = getWeekRangeLabel();
   els.weekRanges.forEach((node) => {
@@ -285,8 +309,9 @@ function updateWeekLabels() {
 }
 
 function setActiveTab(tab, personToFocus = null) {
-  if (!VALID_TABS.includes(tab)) return;
-  activeTab = tab;
+  const nextTab = normalizeTab(tab);
+  if (!VALID_TABS.includes(nextTab)) return;
+  activeTab = nextTab;
   focusPersonId = personToFocus;
   saveState();
   renderApp();
@@ -309,27 +334,25 @@ function changeWeek(action) {
   renderApp();
 }
 
-function renderMiniSummary() {
-  const summary = calculateWeekSummary();
-  els.miniTotal.textContent = `${formatNumber(summary.combinedTotal)}h`;
-  els.miniActive.textContent = String(summary.activeCount);
-  els.miniWarnings.textContent = String(summary.warningCount);
-}
-
 function renderDailyLog() {
   const day = dayByKey(selectedDailyDayKey) || DAYS[0];
   const date = getSelectedDailyDate();
   els.dailyDateLabel.textContent = `${day.label} ${date.getDate()} ${MONTH_NAMES[date.getMonth()]} ${date.getFullYear()}`;
   renderDailyDayButtons();
   renderDailyProgress();
+  renderDailyPeoplePicker();
 
   if (!state.employees.length) {
     els.dailyRoster.innerHTML = `<div class="empty-state">No employees yet. Add your first employee.</div>`;
     els.dailyApplyCustom.disabled = true;
+    els.dailyApplySelected.disabled = true;
+    els.dailyCopyYesterday.disabled = true;
     return;
   }
 
   els.dailyApplyCustom.disabled = false;
+  els.dailyApplySelected.disabled = false;
+  els.dailyCopyYesterday.disabled = !hasYesterdayData();
   const fragment = document.createDocumentFragment();
   state.employees.forEach((employee) => {
     fragment.appendChild(createDailyRow(employee));
@@ -356,6 +379,43 @@ function renderDailyProgress() {
   els.dailyProgress.textContent = `${stats.filledCount}/${stats.employeeCount} entered - ${formatNumber(stats.total)}h total`;
 }
 
+function renderDailyPeoplePicker() {
+  els.dailyPeopleActions.replaceChildren(
+    createDailyPeopleButton("all", "All people", dailyPeopleFill.applyAll),
+    createDailyPeopleButton("choose", "Choose", !dailyPeopleFill.applyAll),
+    createDailyPeopleButton("clear", "Clear", false)
+  );
+
+  if (!state.employees.length) {
+    els.dailyPeopleList.innerHTML = `<div class="empty-state">No employees yet.</div>`;
+    return;
+  }
+
+  const nodes = state.employees.map((employee) => {
+    const label = document.createElement("label");
+    label.className = "check-row";
+    label.innerHTML = `
+      <input type="checkbox" data-daily-person value="${escapeAttr(employee.id)}">
+      <span></span>
+    `;
+    const checkbox = label.querySelector("input");
+    checkbox.checked = dailyPeopleFill.applyAll || dailyPeopleFill.employeeIds.has(employee.id);
+    label.querySelector("span").textContent = displayEmployeeName(employee);
+    return label;
+  });
+  els.dailyPeopleList.replaceChildren(...nodes);
+}
+
+function createDailyPeopleButton(action, label, selected) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "segment-button";
+  button.dataset.dailyPeopleAction = action;
+  button.setAttribute("aria-pressed", String(selected));
+  button.textContent = label;
+  return button;
+}
+
 function createDailyRow(employee) {
   const dayEntry = getEmployeeEntry(employee.id).days[selectedDailyDayKey];
   const parsed = parseHours(dayEntry.hours);
@@ -369,7 +429,7 @@ function createDailyRow(employee) {
       <div>
         <strong>${escapeHtml(displayEmployeeName(employee))}</strong>
         <span>${escapeHtml(employee.role || "No role or note")}</span>
-        <div class="warning-badges">${parsed.empty ? `<span class="badge warning">Needs entry</span>` : `<span class="badge ok">Entered</span>`}</div>
+        <div class="warning-badges">${renderDailyEntryBadge(parsed)}</div>
       </div>
       <div class="daily-hours">
         <label>
@@ -380,8 +440,8 @@ function createDailyRow(employee) {
     </div>
     <div class="daily-row-actions">
       <button type="button" class="button tiny secondary" data-daily-action="preset" data-hours="0" data-employee-id="${escapeAttr(employee.id)}">Off</button>
-      <button type="button" class="button tiny secondary" data-daily-action="preset" data-hours="5" data-employee-id="${escapeAttr(employee.id)}">Half 5h</button>
-      <button type="button" class="button tiny secondary" data-daily-action="preset" data-hours="10" data-employee-id="${escapeAttr(employee.id)}">Full 10h</button>
+      <button type="button" class="button tiny secondary" data-daily-action="preset" data-hours="5" data-employee-id="${escapeAttr(employee.id)}">5h</button>
+      <button type="button" class="button tiny secondary" data-daily-action="preset" data-hours="10" data-employee-id="${escapeAttr(employee.id)}">10h</button>
     </div>
     <div class="daily-step-actions">
       <button type="button" class="button tiny secondary" data-daily-action="step" data-step="1" data-employee-id="${escapeAttr(employee.id)}">+1</button>
@@ -398,6 +458,12 @@ function createDailyRow(employee) {
     </div>
   `;
   return row;
+}
+
+function renderDailyEntryBadge(parsed) {
+  if (!parsed.valid) return `<span class="badge danger">Invalid</span>`;
+  if (parsed.empty) return `<span class="badge warning">Missing</span>`;
+  return `<span class="badge ok">Entered</span>`;
 }
 
 function changeDailyDay(action) {
@@ -458,6 +524,103 @@ function applyDailyCustomToEveryone() {
   applyDailyHoursToEveryone(parsed.value);
 }
 
+function copyYesterdayToSelectedDay() {
+  const previous = getAdjacentDayRef(-1);
+  let copiedCount = 0;
+
+  state.employees.forEach((employee) => {
+    const source = state.weeks[previous.weekKey]?.entries?.[employee.id]?.days?.[previous.dayKey];
+    if (!source) return;
+    getEmployeeEntry(employee.id).days[selectedDailyDayKey] = {
+      hours: source.hours === undefined || source.hours === null ? "" : String(source.hours),
+      note: typeof source.note === "string" ? source.note : ""
+    };
+    copiedCount += 1;
+  });
+
+  if (!copiedCount) {
+    showDailyNotice("No yesterday data to copy.");
+    return;
+  }
+
+  saveState();
+  renderApp();
+  showDailyNotice(`Copied yesterday for ${copiedCount} ${copiedCount === 1 ? "person" : "people"}.`);
+}
+
+function hasYesterdayData() {
+  const previous = getAdjacentDayRef(-1);
+  return state.employees.some((employee) => {
+    const source = state.weeks[previous.weekKey]?.entries?.[employee.id]?.days?.[previous.dayKey];
+    if (!source) return false;
+    return String(source.hours ?? "").trim() !== "" || String(source.note ?? "").trim() !== "";
+  });
+}
+
+function handleDailyPeopleAction(event) {
+  const button = event.target.closest("[data-daily-people-action]");
+  if (!button) return;
+
+  if (button.dataset.dailyPeopleAction === "all") {
+    dailyPeopleFill.applyAll = true;
+    dailyPeopleFill.employeeIds.clear();
+  }
+  if (button.dataset.dailyPeopleAction === "choose") {
+    dailyPeopleFill.applyAll = false;
+  }
+  if (button.dataset.dailyPeopleAction === "clear") {
+    dailyPeopleFill.applyAll = false;
+    dailyPeopleFill.employeeIds.clear();
+  }
+
+  renderDailyPeoplePicker();
+}
+
+function handleDailyPersonChange(event) {
+  const checkbox = event.target.closest("[data-daily-person]");
+  if (!checkbox) return;
+
+  dailyPeopleFill.applyAll = false;
+  if (checkbox.checked) {
+    dailyPeopleFill.employeeIds.add(checkbox.value);
+  } else {
+    dailyPeopleFill.employeeIds.delete(checkbox.value);
+  }
+  renderDailyPeoplePicker();
+}
+
+function applyDailyCustomToSelectedPeople() {
+  const parsed = parseHours(els.dailySelectedCustom.value);
+  if (!parsed.valid || parsed.empty) {
+    els.dailySelectedCustom.classList.add("is-invalid");
+    showDailyNotice("Enter a valid selected-people hour value.");
+    return;
+  }
+  els.dailySelectedCustom.classList.remove("is-invalid");
+
+  const employeeIds = getDailySelectedEmployeeIds();
+  if (!employeeIds.length) {
+    showDailyNotice("Choose at least one person.");
+    return;
+  }
+
+  employeeIds.forEach((employeeId) => {
+    getEmployeeEntry(employeeId).days[selectedDailyDayKey].hours = formatNumber(parsed.value);
+  });
+  saveState();
+  renderApp();
+  showDailyNotice(`${employeeIds.length} ${employeeIds.length === 1 ? "person" : "people"} updated.`);
+}
+
+function getDailySelectedEmployeeIds() {
+  if (dailyPeopleFill.applyAll) {
+    return state.employees.map((employee) => employee.id);
+  }
+  return Array.from(dailyPeopleFill.employeeIds).filter((employeeId) =>
+    state.employees.some((employee) => employee.id === employeeId)
+  );
+}
+
 function handleDailyRosterClick(event) {
   const button = event.target.closest("[data-daily-action]");
   if (!button) return;
@@ -488,7 +651,6 @@ function handleDailyRosterInput(event) {
     saveState();
     updateDailyRow(target.closest(".daily-row"), employeeId);
     renderDailyProgress();
-    renderMiniSummary();
     renderSummaryView();
     renderLogEmployeeList();
     renderPrintReport();
@@ -531,9 +693,7 @@ function updateDailyRow(row, employeeId) {
   row.classList.toggle("has-missing", parsed.empty);
   row.classList.toggle("has-invalid", !parsed.valid);
   if (badges) {
-    badges.innerHTML = parsed.empty
-      ? `<span class="badge warning">Needs entry</span>`
-      : `<span class="badge ok">Entered</span>`;
+    badges.innerHTML = renderDailyEntryBadge(parsed);
   }
 }
 
@@ -1279,7 +1439,7 @@ function toggleNote(employeeId, dayKey) {
 
 function updateAfterEmployeeChange(employeeId, card) {
   updateLogCardSummary(card, employeeId);
-  renderMiniSummary();
+  renderDailyProgress();
   renderSummaryView();
   renderPrintReport();
 }
@@ -1339,7 +1499,7 @@ function addEmployee(event) {
   quickFill.employeeId = employee.id;
   els.addEmployeeForm.reset();
   saveState();
-  setActiveTab("log");
+  setActiveTab("today");
 }
 
 function handlePeopleInput(event) {
@@ -1356,7 +1516,7 @@ function handlePeopleInput(event) {
   }
 
   saveState();
-  renderMiniSummary();
+  renderDailyLog();
   renderSummaryView();
   renderPrintReport();
 }
@@ -1393,7 +1553,6 @@ function handleThresholdInput() {
   els.thresholdInput.classList.remove("is-invalid");
   state.threshold = els.thresholdInput.value === "" ? DEFAULT_THRESHOLD : parsed.value;
   saveState();
-  renderMiniSummary();
   renderLogEmployeeList();
   renderSummaryView();
   renderPrintReport();
@@ -1491,12 +1650,14 @@ function clearAllData() {
 
   state = getDefaultState();
   selectedWeekStart = startOfWeek(new Date());
-  activeTab = "log";
+  activeTab = "today";
   selectedDailyDayKey = getDefaultDailyDayKey();
   expandedEmployeeId = null;
   quickFill.employeeId = "";
   bulkFill.applyAll = true;
   bulkFill.employeeIds.clear();
+  dailyPeopleFill.applyAll = false;
+  dailyPeopleFill.employeeIds.clear();
   localStorage.removeItem(STORAGE_KEY);
   renderApp();
   markSaved("All data cleared.");
@@ -1637,7 +1798,7 @@ function importBackup(event) {
 
       state = normalized;
       selectedWeekStart = parseDateKey(state.selectedWeekStart) || startOfWeek(new Date());
-      activeTab = VALID_TABS.includes(state.lastTab) ? state.lastTab : "log";
+      activeTab = normalizeTab(state.lastTab);
       selectedDailyDayKey = isDayKey(state.lastDailyDayKey) ? state.lastDailyDayKey : getDefaultDailyDayKey();
       expandedEmployeeId = state.lastExpandedEmployeeId || null;
       quickFill.employeeId = state.employees[0]?.id || "";
@@ -1720,7 +1881,7 @@ function normalizeState(input, strict) {
     weeks,
     threshold: Number.isFinite(threshold) && threshold >= 0 ? threshold : DEFAULT_THRESHOLD,
     selectedWeekStart: selectedWeek,
-    lastTab: VALID_TABS.includes(input.lastTab) ? input.lastTab : "log",
+    lastTab: normalizeTab(input.lastTab),
     lastDailyDayKey: isDayKey(input.lastDailyDayKey) ? input.lastDailyDayKey : getTodayDayKeyForWeek(parseDateKey(selectedWeek) || startOfWeek(new Date())) || "monday",
     lastExpandedEmployeeId: typeof input.lastExpandedEmployeeId === "string" ? input.lastExpandedEmployeeId : null
   };
@@ -1793,7 +1954,7 @@ function getDefaultState() {
     weeks: {},
     threshold: DEFAULT_THRESHOLD,
     selectedWeekStart: toDateKey(thisWeek),
-    lastTab: "log",
+    lastTab: "today",
     lastDailyDayKey: getTodayDayKeyForWeek(thisWeek) || "monday",
     lastExpandedEmployeeId: null
   };
@@ -1910,6 +2071,17 @@ function getWeekRangeLabel() {
 function getSelectedDailyDate() {
   const index = DAYS.findIndex((day) => day.key === selectedDailyDayKey);
   return addDays(selectedWeekStart, index >= 0 ? index : 0);
+}
+
+function getAdjacentDayRef(offset) {
+  const targetDate = addDays(getSelectedDailyDate(), offset);
+  const weekStart = startOfWeek(targetDate);
+  const dayKey = DAYS[(targetDate.getDay() + 6) % 7].key;
+  return {
+    date: targetDate,
+    weekKey: toDateKey(weekStart),
+    dayKey
+  };
 }
 
 function getDefaultDailyDayKey() {
