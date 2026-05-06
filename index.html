@@ -102,7 +102,7 @@
               <div class="daily-roster-toolbar">
                 <label class="search-field" for="dailySearch">
                   Search roster
-                  <input id="dailySearch" type="search" autocomplete="off" placeholder="Name or role">
+                  <input id="dailySearch" type="search" autocomplete="off" placeholder="Name, group, or role">
                 </label>
                 <div id="dailyFilterButtons" class="segmented-grid filter-actions" role="group" aria-label="Daily roster filter">
                   <button type="button" class="segment-button" data-daily-filter="all">All</button>
@@ -284,6 +284,10 @@
                   Name
                   <input id="employeeName" name="employeeName" type="text" autocomplete="off" required>
                 </label>
+                <label for="employeeGroup">
+                  Company or group
+                  <input id="employeeGroup" name="employeeGroup" type="text" autocomplete="off">
+                </label>
                 <label for="employeeRole">
                   Role or note
                   <input id="employeeRole" name="employeeRole" type="text" autocomplete="off">
@@ -363,6 +367,10 @@
         <label for="modalEmployeeName">
           Name
           <input id="modalEmployeeName" name="modalEmployeeName" type="text" autocomplete="off" required>
+        </label>
+        <label for="modalEmployeeGroup">
+          Company or group
+          <input id="modalEmployeeGroup" name="modalEmployeeGroup" type="text" autocomplete="off">
         </label>
         <label for="modalEmployeeRole">
           Role or note

@@ -49,6 +49,7 @@ let selectedWeekStart = parseDateKey(state.selectedWeekStart) || startOfWeek(new
 let activeTab = normalizeTab(state.lastTab);
 let selectedDailyDayKey = isDayKey(state.lastDailyDayKey) ? state.lastDailyDayKey : getDefaultDailyDayKey();
 let expandedEmployeeId = state.lastExpandedEmployeeId || null;
+let expandedDailyEmployeeId = state.lastExpandedDailyEmployeeId || null;
 let dailyRosterFilter = normalizeDailyFilter(state.lastDailyFilter);
 let dailySearchQuery = "";
 let saveTimer = null;
@@ -150,10 +151,12 @@ function cacheElements() {
   els.warningsMeta = document.getElementById("warningsMeta");
   els.addEmployeeForm = document.getElementById("addEmployeeForm");
   els.employeeName = document.getElementById("employeeName");
+  els.employeeGroup = document.getElementById("employeeGroup");
   els.employeeRole = document.getElementById("employeeRole");
   els.employeeDialog = document.getElementById("employeeDialog");
   els.employeeDialogForm = document.getElementById("employeeDialogForm");
   els.modalEmployeeName = document.getElementById("modalEmployeeName");
+  els.modalEmployeeGroup = document.getElementById("modalEmployeeGroup");
   els.modalEmployeeRole = document.getElementById("modalEmployeeRole");
   els.employeeDialogClose = document.getElementById("employeeDialogClose");
   els.employeeDialogCancel = document.getElementById("employeeDialogCancel");
@@ -217,6 +220,7 @@ function bindEvents() {
   els.dailyRoster.addEventListener("click", handleDailyRosterClick);
   els.dailyRoster.addEventListener("input", handleDailyRosterInput);
   els.dailyRoster.addEventListener("keydown", handleDailyRosterKeydown);
+  els.dailyRoster.addEventListener("toggle", handleDailyRosterToggle, true);
 
   els.quickPresetButtons.addEventListener("click", handleQuickPresetClick);
   els.quickDayButtons.addEventListener("click", handleQuickDayClick);
@@ -297,6 +301,9 @@ function renderApp() {
 function keepUiStateValid() {
   if (!state.employees.some((employee) => employee.id === expandedEmployeeId)) {
     expandedEmployeeId = null;
+  }
+  if (!state.employees.some((employee) => employee.id === expandedDailyEmployeeId)) {
+    expandedDailyEmployeeId = null;
   }
   if (!isDayKey(selectedDailyDayKey)) {
     selectedDailyDayKey = getDefaultDailyDayKey();
@@ -404,8 +411,19 @@ function renderDailyLog() {
   }
 
   const fragment = document.createDocumentFragment();
-  employees.forEach((employee) => {
-    fragment.appendChild(createDailyRow(employee));
+  groupEmployees(employees).forEach((group) => {
+    const section = document.createElement("section");
+    section.className = "daily-group";
+    section.innerHTML = `
+      <div class="daily-group-heading">
+        <strong>${escapeHtml(group.label)}</strong>
+        <span>${group.employees.length} ${group.employees.length === 1 ? "person" : "people"}</span>
+      </div>
+    `;
+    group.employees.forEach((employee) => {
+      section.appendChild(createDailyRow(employee));
+    });
+    fragment.appendChild(section);
   });
   els.dailyRoster.replaceChildren(fragment);
 }
@@ -452,7 +470,7 @@ function getFilteredDailyEmployees() {
       (dailyRosterFilter === "entered" && status === "entered");
     if (!matchesFilter) return false;
     if (!query) return true;
-    return `${displayEmployeeName(employee)} ${employee.role || ""}`.toLowerCase().includes(query);
+    return getEmployeeSearchText(employee).includes(query);
   });
 }
 
@@ -494,8 +512,12 @@ function findFirstMissingDailyEmployee() {
     const status = getDailyEntryStatus(employee.id);
     if (status !== "missing" && status !== "invalid") return false;
     if (!dailySearchQuery.trim()) return true;
-    return `${displayEmployeeName(employee)} ${employee.role || ""}`.toLowerCase().includes(dailySearchQuery.trim().toLowerCase());
+    return getEmployeeSearchText(employee).includes(dailySearchQuery.trim().toLowerCase());
   });
+}
+
+function getEmployeeSearchText(employee) {
+  return `${displayEmployeeName(employee)} ${displayEmployeeGroup(employee)} ${employee.role || ""}`.toLowerCase();
 }
 
 function getDailyEntryStatus(employeeId) {
@@ -526,7 +548,7 @@ function renderDailyPeoplePicker() {
     `;
     const checkbox = label.querySelector("input");
     checkbox.checked = dailyPeopleFill.applyAll || dailyPeopleFill.employeeIds.has(employee.id);
-    label.querySelector("span").textContent = displayEmployeeName(employee);
+    label.querySelector("span").textContent = displayEmployeeOptionLabel(employee);
     return label;
   });
   els.dailyPeopleList.replaceChildren(...nodes);
@@ -548,39 +570,46 @@ function createDailyRow(employee) {
   const status = getDailyEntryStatus(employee.id);
   const noteKey = getNoteKey(employee.id, selectedDailyDayKey);
   const noteOpen = openNotes.has(noteKey);
-  const row = document.createElement("article");
-  row.className = `daily-row${status === "missing" ? " has-missing" : ""}${status === "invalid" ? " has-invalid" : ""}`;
+  const row = document.createElement("details");
+  row.className = `daily-row daily-details${status === "missing" ? " has-missing" : ""}${status === "invalid" ? " has-invalid" : ""}`;
   row.dataset.employeeId = employee.id;
   row.dataset.dailyStatus = status;
+  row.open = expandedDailyEmployeeId === employee.id || noteOpen;
   row.innerHTML = `
-    <div class="daily-person">
+    <summary class="daily-summary">
       <div>
         <strong>${escapeHtml(displayEmployeeName(employee))}</strong>
-        <span>${escapeHtml(employee.role || "No role or note")}</span>
+        <span>${escapeHtml(displayEmployeeGroup(employee))}${employee.role ? ` - ${escapeHtml(employee.role)}` : ""}</span>
         <div class="warning-badges">${renderDailyEntryBadge(parsed)}</div>
       </div>
+      <div class="daily-summary-hours">
+        <strong>${escapeHtml(dayEntry.hours === "" ? "0" : dayEntry.hours)}h</strong>
+        <span>Hours</span>
+      </div>
+    </summary>
+    <div class="daily-entry-controls">
       <div class="daily-hours">
         <label>
           Hours
           <input type="number" min="0" step="0.25" inputmode="decimal" value="${escapeAttr(dayEntry.hours)}" data-daily-hours data-employee-id="${escapeAttr(employee.id)}">
         </label>
       </div>
-    </div>
-    <div class="daily-row-actions">
-      <button type="button" class="button tiny secondary" data-daily-action="preset" data-hours="0" data-employee-id="${escapeAttr(employee.id)}">Off</button>
-      <button type="button" class="button tiny secondary" data-daily-action="preset" data-hours="5" data-employee-id="${escapeAttr(employee.id)}">5h</button>
-      <button type="button" class="button tiny secondary" data-daily-action="preset" data-hours="10" data-employee-id="${escapeAttr(employee.id)}">10h</button>
-      <button type="button" class="button tiny secondary" data-daily-action="step" data-step="1" data-employee-id="${escapeAttr(employee.id)}">+1</button>
-      <button type="button" class="button tiny secondary" data-daily-action="step" data-step="-1" data-employee-id="${escapeAttr(employee.id)}">-1</button>
-    </div>
-    <button type="button" class="button tiny secondary" data-daily-action="toggle-note" data-employee-id="${escapeAttr(employee.id)}">
-      ${noteOpen ? "Hide note" : dayEntry.note ? "Edit note" : "Add note"}
-    </button>
-    <div class="note-wrap${noteOpen ? " is-open" : ""}">
-      <label>
-        Note
-        <textarea rows="2" data-daily-note data-employee-id="${escapeAttr(employee.id)}">${escapeHtml(dayEntry.note)}</textarea>
-      </label>
+      <div class="daily-row-actions">
+        <button type="button" class="button tiny secondary" data-daily-action="preset" data-hours="0" data-employee-id="${escapeAttr(employee.id)}">Off</button>
+        <button type="button" class="button tiny secondary" data-daily-action="preset" data-hours="5" data-employee-id="${escapeAttr(employee.id)}">5h</button>
+        <button type="button" class="button tiny secondary" data-daily-action="preset" data-hours="10" data-employee-id="${escapeAttr(employee.id)}">10h</button>
+        <button type="button" class="button tiny secondary" data-daily-action="step" data-step="1" data-employee-id="${escapeAttr(employee.id)}">+1</button>
+        <button type="button" class="button tiny secondary" data-daily-action="step" data-step="-1" data-employee-id="${escapeAttr(employee.id)}">-1</button>
+      </div>
+      <button type="button" class="button tiny secondary" data-daily-action="toggle-note" data-employee-id="${escapeAttr(employee.id)}">
+        ${noteOpen ? "Hide note" : dayEntry.note ? "Edit note" : "Add note"}
+      </button>
+      <div class="note-wrap${noteOpen ? " is-open" : ""}">
+        <label>
+          Note
+          <textarea rows="2" data-daily-note data-employee-id="${escapeAttr(employee.id)}">${escapeHtml(dayEntry.note)}</textarea>
+        </label>
+      </div>
     </div>
   `;
   return row;
@@ -753,17 +782,35 @@ function handleDailyRosterClick(event) {
 
   const employeeId = button.dataset.employeeId;
   if (button.dataset.dailyAction === "preset") {
+    expandedDailyEmployeeId = employeeId;
     setDailyEmployeeHours(employeeId, Number(button.dataset.hours));
   }
   if (button.dataset.dailyAction === "step") {
+    expandedDailyEmployeeId = employeeId;
     stepDailyEmployeeHours(employeeId, Number(button.dataset.step));
   }
   if (button.dataset.dailyAction === "toggle-note") {
     const noteKey = getNoteKey(employeeId, selectedDailyDayKey);
     if (openNotes.has(noteKey)) openNotes.delete(noteKey);
     else openNotes.add(noteKey);
+    expandedDailyEmployeeId = employeeId;
     renderDailyLog();
   }
+}
+
+function handleDailyRosterToggle(event) {
+  const row = event.target.closest(".daily-row");
+  if (!row) return;
+
+  if (row.open) {
+    expandedDailyEmployeeId = row.dataset.employeeId;
+    els.dailyRoster.querySelectorAll(".daily-row[open]").forEach((otherRow) => {
+      if (otherRow !== row) otherRow.open = false;
+    });
+  } else if (expandedDailyEmployeeId === row.dataset.employeeId) {
+    expandedDailyEmployeeId = null;
+  }
+  saveState();
 }
 
 function handleDailyRosterInput(event) {
@@ -774,6 +821,7 @@ function handleDailyRosterInput(event) {
   if (target.matches("[data-daily-hours]")) {
     if (target.value.startsWith("-")) target.value = "";
     getEmployeeEntry(employeeId).days[selectedDailyDayKey].hours = target.value;
+    expandedDailyEmployeeId = employeeId;
     saveState();
     updateDailyRow(target.closest(".daily-row"), employeeId);
     renderDailyProgress();
@@ -785,6 +833,7 @@ function handleDailyRosterInput(event) {
 
   if (target.matches("[data-daily-note]")) {
     getEmployeeEntry(employeeId).days[selectedDailyDayKey].note = target.value;
+    expandedDailyEmployeeId = employeeId;
     saveState();
     renderSummaryView();
     renderPrintReport();
@@ -799,6 +848,7 @@ function handleDailyRosterKeydown(event) {
 
 function setDailyEmployeeHours(employeeId, hours) {
   getEmployeeEntry(employeeId).days[selectedDailyDayKey].hours = formatNumber(Math.max(0, Number(hours) || 0));
+  expandedDailyEmployeeId = employeeId;
   saveState();
   renderApp();
 }
@@ -808,6 +858,7 @@ function stepDailyEmployeeHours(employeeId, step) {
   const parsed = parseHours(dayEntry.hours);
   const current = parsed.valid ? parsed.value : 0;
   dayEntry.hours = formatNumber(Math.max(0, current + step));
+  expandedDailyEmployeeId = employeeId;
   saveState();
   renderApp();
 }
@@ -817,11 +868,16 @@ function updateDailyRow(row, employeeId) {
   const parsed = parseHours(getEmployeeEntry(employeeId).days[selectedDailyDayKey].hours);
   const status = getDailyEntryStatus(employeeId);
   const badges = row.querySelector(".warning-badges");
+  const summaryHours = row.querySelector(".daily-summary-hours strong");
   row.dataset.dailyStatus = status;
   row.classList.toggle("has-missing", status === "missing");
   row.classList.toggle("has-invalid", status === "invalid");
   if (badges) {
     badges.innerHTML = renderDailyEntryBadge(parsed);
+  }
+  if (summaryHours) {
+    const hours = getEmployeeEntry(employeeId).days[selectedDailyDayKey].hours;
+    summaryHours.textContent = `${hours === "" ? "0" : hours}h`;
   }
   renderDailyRosterTools();
 }
@@ -841,7 +897,7 @@ function calculateDailyStats(dayKey) {
 function renderQuickFill() {
   const options = state.employees.map((employee) => {
     const selected = employee.id === quickFill.employeeId ? " selected" : "";
-    return `<option value="${escapeAttr(employee.id)}"${selected}>${escapeHtml(displayEmployeeName(employee))}</option>`;
+    return `<option value="${escapeAttr(employee.id)}"${selected}>${escapeHtml(displayEmployeeOptionLabel(employee))}</option>`;
   });
 
   els.quickEmployee.innerHTML = options.length ? options.join("") : `<option value="">No employees yet</option>`;
@@ -964,7 +1020,7 @@ function renderBulkFill() {
       `;
       const checkbox = label.querySelector("input");
       checkbox.checked = bulkFill.applyAll || bulkFill.employeeIds.has(employee.id);
-      label.querySelector("span").textContent = displayEmployeeName(employee);
+      label.querySelector("span").textContent = displayEmployeeOptionLabel(employee);
       return label;
     });
     els.bulkPeopleList.replaceChildren(...peopleNodes);
@@ -1152,7 +1208,7 @@ function createLogEmployeeCard(employee) {
       <div class="employee-summary">
         <div class="employee-main">
           <span class="employee-name">${escapeHtml(displayEmployeeName(employee))}</span>
-          <span class="employee-role">${escapeHtml(employee.role || "No role or note")}</span>
+          <span class="employee-role">${escapeHtml(displayEmployeeGroup(employee))}${employee.role ? ` - ${escapeHtml(employee.role)}` : ""}</span>
           <div class="warning-badges">${renderBadges(analysis.warningBadges)}</div>
         </div>
         <div class="employee-total">
@@ -1314,7 +1370,7 @@ function renderEmployeeTotals(summary) {
     const row = document.createElement("div");
     row.className = "list-item";
     row.innerHTML = `<strong></strong><span></span>`;
-    row.querySelector("strong").textContent = displayEmployeeName(item.employee);
+    row.querySelector("strong").textContent = displayEmployeeOptionLabel(item.employee);
     row.querySelector("span").textContent = `${formatNumber(item.total)}h`;
     return row;
   });
@@ -1349,6 +1405,22 @@ function createBadge(text, type) {
   return node;
 }
 
+function groupEmployees(employees) {
+  const groups = new Map();
+  employees.forEach((employee) => {
+    const label = displayEmployeeGroup(employee);
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(employee);
+  });
+
+  return Array.from(groups.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([label, groupEmployeesList]) => ({
+      label,
+      employees: groupEmployeesList.slice().sort((left, right) => displayEmployeeName(left).localeCompare(displayEmployeeName(right)))
+    }));
+}
+
 function renderBadges(badges) {
   if (!badges.length) return `<span class="badge ok">Ready</span>`;
   return badges.map((badge) => `<span class="badge ${badge.type}">${escapeHtml(badge.label)}</span>`).join("");
@@ -1361,31 +1433,46 @@ function renderPeopleView() {
   }
 
   const fragment = document.createDocumentFragment();
-  state.employees.forEach((employee) => {
-    const card = document.createElement("details");
-    card.className = "person-card person-details";
-    card.dataset.employeeId = employee.id;
-    card.innerHTML = `
-      <summary>
-        <span>
-          <strong>${escapeHtml(displayEmployeeName(employee))}</strong>
-          <small>${escapeHtml(employee.role || "No role or note")}</small>
-        </span>
-        <span class="summary-meta">Edit</span>
-      </summary>
-      <div class="person-fields">
-        <label>
-          Employee name
-          <input type="text" value="${escapeAttr(employee.name)}" autocomplete="off" data-person-name data-employee-id="${escapeAttr(employee.id)}">
-        </label>
-        <label>
-          Role or note
-          <input type="text" value="${escapeAttr(employee.role || "")}" autocomplete="off" data-person-role data-employee-id="${escapeAttr(employee.id)}">
-        </label>
+  groupEmployees(state.employees).forEach((group) => {
+    const section = document.createElement("section");
+    section.className = "people-group";
+    section.innerHTML = `
+      <div class="daily-group-heading">
+        <strong>${escapeHtml(group.label)}</strong>
+        <span>${group.employees.length} ${group.employees.length === 1 ? "person" : "people"}</span>
       </div>
-      <button type="button" class="button danger" data-delete-employee data-employee-id="${escapeAttr(employee.id)}">Delete</button>
     `;
-    fragment.appendChild(card);
+    group.employees.forEach((employee) => {
+      const card = document.createElement("details");
+      card.className = "person-card person-details";
+      card.dataset.employeeId = employee.id;
+      card.innerHTML = `
+        <summary>
+          <span>
+            <strong>${escapeHtml(displayEmployeeName(employee))}</strong>
+            <small>${escapeHtml(displayEmployeeGroup(employee))}${employee.role ? ` - ${escapeHtml(employee.role)}` : ""}</small>
+          </span>
+          <span class="summary-meta">Edit</span>
+        </summary>
+        <div class="person-fields">
+          <label>
+            Employee name
+            <input type="text" value="${escapeAttr(employee.name)}" autocomplete="off" data-person-name data-employee-id="${escapeAttr(employee.id)}">
+          </label>
+          <label>
+            Company or group
+            <input type="text" value="${escapeAttr(employee.group || "")}" autocomplete="off" data-person-group data-employee-id="${escapeAttr(employee.id)}">
+          </label>
+          <label>
+            Role or note
+            <input type="text" value="${escapeAttr(employee.role || "")}" autocomplete="off" data-person-role data-employee-id="${escapeAttr(employee.id)}">
+          </label>
+        </div>
+        <button type="button" class="button danger" data-delete-employee data-employee-id="${escapeAttr(employee.id)}">Delete</button>
+      `;
+      section.appendChild(card);
+    });
+    fragment.appendChild(section);
   });
   els.peopleList.replaceChildren(fragment);
 }
@@ -1621,7 +1708,7 @@ function setEmployeeDays(employeeId, days, hours) {
 
 function addEmployee(event) {
   event.preventDefault();
-  const employee = createEmployeeFromFields(els.employeeName.value, els.employeeRole.value);
+  const employee = createEmployeeFromFields(els.employeeName.value, els.employeeGroup.value, els.employeeRole.value);
   if (!employee) {
     els.employeeName.focus();
     return;
@@ -1633,7 +1720,7 @@ function addEmployee(event) {
 
 function addEmployeeFromDialog(event) {
   event.preventDefault();
-  const employee = createEmployeeFromFields(els.modalEmployeeName.value, els.modalEmployeeRole.value);
+  const employee = createEmployeeFromFields(els.modalEmployeeName.value, els.modalEmployeeGroup.value, els.modalEmployeeRole.value);
   if (!employee) {
     els.modalEmployeeName.focus();
     return;
@@ -1644,13 +1731,14 @@ function addEmployeeFromDialog(event) {
   setActiveTab("today");
 }
 
-function createEmployeeFromFields(name, role) {
+function createEmployeeFromFields(name, group, role) {
   const employeeName = String(name || "").trim();
   if (!employeeName) return null;
 
   const employee = {
     id: createId(),
     name: employeeName,
+    group: String(group || "").trim(),
     role: String(role || "").trim()
   };
   state.employees.push(employee);
@@ -1689,12 +1777,18 @@ function handlePeopleInput(event) {
   if (target.matches("[data-person-name]")) {
     employee.name = target.value;
   }
+  if (target.matches("[data-person-group]")) {
+    employee.group = target.value;
+  }
   if (target.matches("[data-person-role]")) {
     employee.role = target.value;
   }
 
   saveState();
   renderDailyLog();
+  renderQuickFill();
+  renderBulkFill();
+  renderLogEmployeeList();
   renderSummaryView();
   renderPrintReport();
 }
@@ -1715,6 +1809,7 @@ function handlePeopleClick(event) {
     if (week.entries) delete week.entries[employeeId];
   });
   if (expandedEmployeeId === employeeId) expandedEmployeeId = null;
+  if (expandedDailyEmployeeId === employeeId) expandedDailyEmployeeId = null;
   if (quickFill.employeeId === employeeId) quickFill.employeeId = state.employees[0]?.id || "";
   saveState();
   renderApp();
@@ -1831,6 +1926,7 @@ function clearAllData() {
   activeTab = "today";
   selectedDailyDayKey = getDefaultDailyDayKey();
   expandedEmployeeId = null;
+  expandedDailyEmployeeId = null;
   dailyRosterFilter = "all";
   dailySearchQuery = "";
   quickFill.employeeId = "";
@@ -1851,6 +1947,7 @@ function exportCsv() {
     "week start date",
     "week end date",
     "employee name",
+    "company/group",
     "role/note"
   ];
 
@@ -1867,6 +1964,7 @@ function exportCsv() {
       weekStartKey,
       weekEndKey,
       displayEmployeeName(employee),
+      employee.group || "",
       employee.role || ""
     ];
 
@@ -1892,6 +1990,7 @@ function renderPrintReport() {
     const analysis = analyzeEmployee(employee.id);
     const cells = [
       `<td><strong>${escapeHtml(displayEmployeeName(employee))}</strong></td>`,
+      `<td>${escapeHtml(employee.group || "")}</td>`,
       `<td>${escapeHtml(employee.role || "")}</td>`
     ];
 
@@ -1940,13 +2039,14 @@ function renderPrintReport() {
       <thead>
         <tr>
           <th>Employee</th>
+          <th>Company/group</th>
           <th>Role/note</th>
           ${DAYS.map((day) => `<th>${day.short}<br>hours and notes</th>`).join("")}
           <th>Total</th>
           <th>Warning status</th>
         </tr>
       </thead>
-      <tbody>${employeeRows || `<tr><td colspan="11">No employees</td></tr>`}</tbody>
+      <tbody>${employeeRows || `<tr><td colspan="12">No employees</td></tr>`}</tbody>
     </table>
   `;
 }
@@ -1983,6 +2083,7 @@ function importBackup(event) {
       dailyRosterFilter = normalizeDailyFilter(state.lastDailyFilter);
       dailySearchQuery = "";
       expandedEmployeeId = state.lastExpandedEmployeeId || null;
+      expandedDailyEmployeeId = state.lastExpandedDailyEmployeeId || null;
       quickFill.employeeId = state.employees[0]?.id || "";
       saveState();
       renderApp();
@@ -2012,6 +2113,7 @@ function saveState() {
   state.lastDailyDayKey = selectedDailyDayKey;
   state.lastDailyFilter = dailyRosterFilter;
   state.lastExpandedEmployeeId = expandedEmployeeId;
+  state.lastExpandedDailyEmployeeId = expandedDailyEmployeeId;
 
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeState(state, false)));
@@ -2067,7 +2169,8 @@ function normalizeState(input, strict) {
     lastTab: normalizeTab(input.lastTab),
     lastDailyDayKey: isDayKey(input.lastDailyDayKey) ? input.lastDailyDayKey : getTodayDayKeyForWeek(parseDateKey(selectedWeek) || startOfWeek(new Date())) || "monday",
     lastDailyFilter: normalizeDailyFilter(input.lastDailyFilter),
-    lastExpandedEmployeeId: typeof input.lastExpandedEmployeeId === "string" ? input.lastExpandedEmployeeId : null
+    lastExpandedEmployeeId: typeof input.lastExpandedEmployeeId === "string" ? input.lastExpandedEmployeeId : null,
+    lastExpandedDailyEmployeeId: typeof input.lastExpandedDailyEmployeeId === "string" ? input.lastExpandedDailyEmployeeId : null
   };
 }
 
@@ -2076,6 +2179,7 @@ function normalizeEmployee(employee) {
   return {
     id: typeof employee.id === "string" && employee.id ? employee.id : createId(),
     name: typeof employee.name === "string" ? employee.name : "",
+    group: typeof employee.group === "string" ? employee.group : typeof employee.company === "string" ? employee.company : "",
     role: typeof employee.role === "string" ? employee.role : ""
   };
 }
@@ -2141,7 +2245,8 @@ function getDefaultState() {
     lastTab: "today",
     lastDailyDayKey: getTodayDayKeyForWeek(thisWeek) || "monday",
     lastDailyFilter: "all",
-    lastExpandedEmployeeId: null
+    lastExpandedEmployeeId: null,
+    lastExpandedDailyEmployeeId: null
   };
 }
 
@@ -2304,6 +2409,16 @@ function formatNumber(value) {
 function displayEmployeeName(employee) {
   const name = (employee.name || "").trim();
   return name || "Unnamed employee";
+}
+
+function displayEmployeeGroup(employee) {
+  const group = (employee.group || "").trim();
+  return group || "No company or group";
+}
+
+function displayEmployeeOptionLabel(employee) {
+  const group = (employee.group || "").trim();
+  return group ? `${displayEmployeeName(employee)} - ${group}` : displayEmployeeName(employee);
 }
 
 function dayByKey(key) {

@@ -24,7 +24,7 @@ On phones, use the sticky bottom navigation. On desktop, the same sections appea
 
 ## Add employees
 
-On a phone, tap `+ Person` to open the add employee sheet. Enter a name, optionally add a role or note, and tap Add person. The same add form is also available in People inside the collapsed Add employee section.
+On a phone, tap `+ Person` to open the add employee sheet. Enter a name, optionally add a company or group, optionally add a role or note, and tap Add person. The same add form is also available in People inside the collapsed Add employee section.
 
 Employees stay available every week. Their hours and daily notes are stored separately for each Monday to Sunday week.
 
@@ -37,10 +37,11 @@ Today includes frequent supervisor shortcuts:
 - All 10h: sets everyone on the selected date to 10 hours.
 - Custom or selected people: apply one custom value to everyone or only chosen people.
 - Copy yesterday: copies the previous day's hours and notes into the selected date when previous-day data exists.
-- Roster tools: search by name or role, filter to All, Needs entry, or Entered, and jump to the first missing or invalid row.
+- Roster tools: search by name, company/group, or role, filter to All, Needs entry, or Entered, and jump to the first missing or invalid row.
 
 Each employee row includes:
 
+- A collapsed row summary with name, company/group, status, and current hours.
 - Manual decimal hour input.
 - Off, 5h, and 10h buttons.
 - +1 and -1 buttons. Hours never go below 0.
@@ -61,13 +62,13 @@ Employee week panels include Full Week 10h, Half Week 5h, Clear Week, Copy Previ
 
 ## Week-to-week memory
 
-The selected week, selected day, active section, roster filter, expanded employee, employees, threshold, hours, and notes are saved in `localStorage` under `weeklyHoursTracker:v1`. Data persists after refreshes on the same browser and device.
+The selected week, selected day, active section, roster filter, expanded employee, employees, employee groups, threshold, hours, and notes are saved in `localStorage` under `weeklyHoursTracker:v1`. Data persists after refreshes on the same browser and device.
 
 If browser storage is empty or unreadable, the app starts with a clean tracker instead of crashing.
 
 ## CSV export
 
-Go to Week, expand Export report, and tap CSV. The export includes the selected week only, with week start and end dates, employee details, daily hours, daily notes, weekly total, threshold, and warning status.
+Go to Week, expand Export report, and tap CSV. The export includes the selected week only, with week start and end dates, employee details, company/group, daily hours, daily notes, weekly total, threshold, and warning status.
 
 CSV values are escaped for commas, quotes, and line breaks. The filename uses `weekly-hours-YYYY-MM-DD.csv`.
 

@@ -399,6 +399,34 @@ p {
   padding: 10px;
 }
 
+.daily-group,
+.people-group {
+  display: grid;
+  gap: 8px;
+}
+
+.daily-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 2px 0;
+  color: var(--text);
+}
+
+.daily-group-heading strong {
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+  font-weight: 950;
+}
+
+.daily-group-heading span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
 .daily-row {
   display: grid;
   gap: 8px;
@@ -408,6 +436,68 @@ p {
   background: #ffffff;
   scroll-margin-top: 188px;
   transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.daily-row > summary {
+  list-style: none;
+}
+
+.daily-row > summary::-webkit-details-marker {
+  display: none;
+}
+
+.daily-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(76px, auto) 14px;
+  gap: 10px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.daily-summary::after {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg);
+  transition: transform 160ms ease;
+}
+
+.daily-row[open] .daily-summary::after {
+  transform: rotate(225deg);
+}
+
+.daily-summary strong,
+.daily-summary span {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.daily-summary span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.daily-summary-hours {
+  text-align: right;
+}
+
+.daily-summary-hours strong {
+  color: var(--text);
+  font-size: 1.1rem;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.daily-entry-controls {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  animation: details-reveal 150ms ease;
 }
 
 .daily-row.has-missing {
@@ -1198,6 +1288,14 @@ input.is-invalid {
     align-items: end;
   }
 
+  .employee-form {
+    grid-template-columns: repeat(3, minmax(180px, 1fr)) auto;
+  }
+
+  .settings-panel {
+    grid-template-columns: minmax(220px, 320px);
+  }
+
   .action-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1240,7 +1338,7 @@ input.is-invalid {
   }
 
   .person-fields {
-    grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr);
+    grid-template-columns: repeat(3, minmax(180px, 1fr));
   }
 
   .export-bar {
