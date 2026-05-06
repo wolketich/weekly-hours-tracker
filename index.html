@@ -6,7 +6,6 @@
     <meta name="theme-color" content="#f7f8fa">
     <meta name="description" content="A local weekly hours tracker for daily supervisor entry.">
     <title>Weekly Hours Tracker</title>
-    <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="icons/icon.svg">
     <link rel="stylesheet" href="styles.css">
@@ -68,7 +67,10 @@
                 <button type="button" class="button primary" data-daily-all="10">All 10h</button>
               </div>
               <details class="tool-details compact-tools">
-                <summary>Custom or selected people</summary>
+                <summary>
+                  <span>Custom or selected people</span>
+                  <span class="summary-meta">Less common</span>
+                </summary>
                 <div class="daily-custom-all">
                   <label for="dailyAllCustom">
                     Custom hours
@@ -91,6 +93,25 @@
                 </div>
               </details>
             </div>
+
+            <details class="tool-details compact-tools roster-tools">
+              <summary>
+                <span>Roster tools</span>
+                <span id="dailyFilterMeta" class="summary-meta">All people</span>
+              </summary>
+              <div class="daily-roster-toolbar">
+                <label class="search-field" for="dailySearch">
+                  Search roster
+                  <input id="dailySearch" type="search" autocomplete="off" placeholder="Name or role">
+                </label>
+                <div id="dailyFilterButtons" class="segmented-grid filter-actions" role="group" aria-label="Daily roster filter">
+                  <button type="button" class="segment-button" data-daily-filter="all">All</button>
+                  <button type="button" class="segment-button" data-daily-filter="missing">Needs entry</button>
+                  <button type="button" class="segment-button" data-daily-filter="entered">Entered</button>
+                </div>
+                <button type="button" class="button secondary full-width" id="dailyJumpMissing">Jump to missing</button>
+              </div>
+            </details>
 
             <h2 id="dailyRosterHeading" class="sr-only">Daily employee roster</h2>
             <div id="dailyRoster" class="daily-roster"></div>
@@ -115,31 +136,49 @@
           <section class="summary-layout screen-only">
             <div id="summaryMetrics" class="metric-grid"></div>
 
-            <div class="summary-columns">
-              <section class="panel" aria-labelledby="dayTotalsHeading">
-                <h3 id="dayTotalsHeading">Total hours per day</h3>
+            <div class="summary-columns collapsible-columns">
+              <details class="tool-details summary-detail">
+                <summary>
+                  <span>Total hours per day</span>
+                  <span id="dayTotalsMeta" class="summary-meta">7 days</span>
+                </summary>
                 <div id="dayTotals" class="list-stack"></div>
-              </section>
+              </details>
 
-              <section class="panel" aria-labelledby="employeeTotalsHeading">
-                <h3 id="employeeTotalsHeading">Total hours per employee</h3>
+              <details class="tool-details summary-detail">
+                <summary>
+                  <span>Total hours per employee</span>
+                  <span id="employeeTotalsMeta" class="summary-meta">0 people</span>
+                </summary>
                 <div id="employeeTotals" class="list-stack"></div>
-              </section>
+              </details>
 
-              <section class="panel" aria-labelledby="warningsHeading">
-                <h3 id="warningsHeading">Warnings</h3>
+              <details class="tool-details summary-detail">
+                <summary>
+                  <span>Warnings</span>
+                  <span id="warningsMeta" class="summary-meta">0</span>
+                </summary>
                 <div id="warningSummary" class="badge-list"></div>
-              </section>
+              </details>
             </div>
           </section>
 
-          <div class="export-bar screen-only" aria-label="Export selected week">
-            <button type="button" class="button primary" id="exportCsv">CSV</button>
-            <button type="button" class="button secondary" id="printReport">PDF / Print</button>
-          </div>
+          <details class="tool-details screen-only">
+            <summary>
+              <span>Export report</span>
+              <span class="summary-meta">CSV and PDF</span>
+            </summary>
+            <div class="export-bar" aria-label="Export selected week">
+              <button type="button" class="button primary" id="exportCsv">CSV</button>
+              <button type="button" class="button secondary" id="printReport">PDF / Print</button>
+            </div>
+          </details>
 
           <details class="tool-details screen-only">
-            <summary>Week tools</summary>
+            <summary>
+              <span>Week tools</span>
+              <span class="summary-meta">Quick Fill and panels</span>
+            </summary>
             <section class="panel quick-fill-card" aria-labelledby="quickFillHeading">
               <div class="panel-heading">
                 <div>
@@ -231,22 +270,28 @@
             </div>
           </div>
 
-          <section class="panel screen-only" aria-labelledby="addEmployeeHeading">
-            <h3 id="addEmployeeHeading">Add employee</h3>
-            <form id="addEmployeeForm" class="employee-form">
-              <label for="employeeName">
-                Name
-                <input id="employeeName" name="employeeName" type="text" autocomplete="off" required>
-              </label>
-              <label for="employeeRole">
-                Role or note
-                <input id="employeeRole" name="employeeRole" type="text" autocomplete="off">
-              </label>
-              <button type="submit" class="button primary">Add</button>
-            </form>
-          </section>
-
           <section id="peopleList" class="people-stack screen-only" aria-live="polite"></section>
+
+          <details class="tool-details screen-only">
+            <summary>
+              <span>Add employee</span>
+              <span class="summary-meta">Backup form</span>
+            </summary>
+            <section class="panel" aria-labelledby="addEmployeeHeading">
+              <h3 id="addEmployeeHeading">Add employee</h3>
+              <form id="addEmployeeForm" class="employee-form">
+                <label for="employeeName">
+                  Name
+                  <input id="employeeName" name="employeeName" type="text" autocomplete="off" required>
+                </label>
+                <label for="employeeRole">
+                  Role or note
+                  <input id="employeeRole" name="employeeRole" type="text" autocomplete="off">
+                </label>
+                <button type="submit" class="button primary">Add</button>
+              </form>
+            </section>
+          </details>
         </section>
 
         <section id="view-settings" class="view" data-view="settings" aria-labelledby="settingsHeading">
@@ -259,7 +304,10 @@
           </div>
 
           <details class="tool-details screen-only" open>
-            <summary>Work rules</summary>
+            <summary>
+              <span>Work rules</span>
+              <span class="summary-meta">Threshold</span>
+            </summary>
             <section class="panel settings-panel">
               <label for="thresholdInput">
                 Weekly threshold
@@ -269,7 +317,10 @@
           </details>
 
           <details class="tool-details screen-only">
-            <summary>Backup and clear data</summary>
+            <summary>
+              <span>Backup and clear data</span>
+              <span class="summary-meta">Advanced</span>
+            </summary>
             <section class="panel data-panel" aria-labelledby="dataHeading">
               <div>
                 <h3 id="dataHeading">Backup and clear data</h3>
@@ -292,12 +343,37 @@
         <section id="printArea" class="print-report" aria-label="Printable weekly report"></section>
       </main>
 
-      <button type="button" id="fabAddEmployee" class="fab screen-only" aria-label="Add employee">Add</button>
+      <button type="button" id="fabAddEmployee" class="fab screen-only" aria-label="Add employee">+ Person</button>
 
       <footer class="app-footer screen-only">
         Data is stored only on this device.
       </footer>
     </div>
+
+    <dialog id="employeeDialog" class="employee-dialog screen-only" aria-labelledby="employeeDialogTitle">
+      <form id="employeeDialogForm" class="employee-dialog-card">
+        <div class="dialog-handle" aria-hidden="true"></div>
+        <div class="dialog-heading">
+          <div>
+            <p class="section-kicker">New person</p>
+            <h2 id="employeeDialogTitle">Add employee</h2>
+          </div>
+          <button type="button" class="button tiny secondary dialog-close" id="employeeDialogClose" aria-label="Close add employee">Close</button>
+        </div>
+        <label for="modalEmployeeName">
+          Name
+          <input id="modalEmployeeName" name="modalEmployeeName" type="text" autocomplete="off" required>
+        </label>
+        <label for="modalEmployeeRole">
+          Role or note
+          <input id="modalEmployeeRole" name="modalEmployeeRole" type="text" autocomplete="off">
+        </label>
+        <div class="dialog-actions">
+          <button type="button" class="button secondary" id="employeeDialogCancel">Cancel</button>
+          <button type="submit" class="button primary">Add person</button>
+        </div>
+      </form>
+    </dialog>
 
     <script src="app.js" defer></script>
   </body>
