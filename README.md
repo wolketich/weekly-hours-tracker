@@ -11,7 +11,7 @@ Open `index.html` in a browser. The app starts on Today because the fastest work
 3. Use the group Off, 5h, or 10h buttons when one crew has the same day.
 4. Adjust individual workers with Off, 5h, 10h, +1, or -1.
 5. Open notes only for rows that need them.
-6. Tap Start Sign-Off and sign workers one at a time.
+6. Tap Sign / Close Day and sign workers one at a time.
 
 The Today screen shows the selected date, daily progress, sign-off progress, and a compact collapsible roster. It avoids the large all-week table so a supervisor can fill the day with minimal scrolling.
 
@@ -19,13 +19,16 @@ The Today screen shows the selected date, daily progress, sign-off progress, and
 
 The sign-off flow is per worker, per day:
 
-1. Fill the worker's hours first.
-2. Tap Start Sign-Off.
-3. Review the worker, group, credential details, hours, and note.
-4. Take or choose a fresh ID-card photo.
-5. Tap Sign worker.
+1. Tap Sign / Close Day.
+2. Review the worker, group, credential details, saved hours, and saved note.
+3. Enter or adjust the hours in the sign-off sheet.
+4. Add or adjust the note if needed.
+5. Take or choose a fresh ID-card photo when hours are above `0`.
+6. Tap Sign worker.
 
-Blank hours cannot be signed. An explicit `0` can be signed. After a worker is signed, that worker's hours and note for the selected day are locked in the normal entry screens.
+Blank hours cannot be signed. An explicit `0` can be signed as absent: no photo is required, but a note is required. After a worker is signed, that worker's hours and note for the selected day are locked in the normal entry screens. The Sign worker button stays visible even when the row still needs hours, a note, or a photo, so the app can explain what is missing.
+
+Use Prev and Next, or swipe left and right on the sign-off sheet, to review workers without closing the modal. The top of the sheet shows the current position, such as `1/10`.
 
 To edit a signed row, use Reopen sign-off. The old signed snapshot is kept in history as voided, and the worker must be signed again after edits.
 

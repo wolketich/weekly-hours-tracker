@@ -85,6 +85,8 @@ const dailyPeopleFill = {
 let signOffQueue = [];
 let signOffIndex = 0;
 let signOffPhotoFile = null;
+let signOffTouchStartX = 0;
+let signOffTouchStartY = 0;
 
 document.addEventListener("DOMContentLoaded", init);
 
@@ -191,11 +193,15 @@ function cacheElements() {
   els.signOffForm = document.getElementById("signOffForm");
   els.signOffProgress = document.getElementById("signOffProgress");
   els.signOffWorkerCard = document.getElementById("signOffWorkerCard");
+  els.signOffHoursInput = document.getElementById("signOffHoursInput");
+  els.signOffHourActions = document.getElementById("signOffHourActions");
+  els.signOffNoteInput = document.getElementById("signOffNoteInput");
   els.signOffPhotoInput = document.getElementById("signOffPhotoInput");
   els.signOffPhotoPreview = document.getElementById("signOffPhotoPreview");
   els.signOffNotice = document.getElementById("signOffNotice");
   els.signOffClose = document.getElementById("signOffClose");
-  els.signOffSkip = document.getElementById("signOffSkip");
+  els.signOffPrev = document.getElementById("signOffPrev");
+  els.signOffNext = document.getElementById("signOffNext");
   els.signOffReopen = document.getElementById("signOffReopen");
   els.signOffConfirm = document.getElementById("signOffConfirm");
   els.peopleList = document.getElementById("peopleList");
@@ -310,10 +316,17 @@ function bindEvents() {
     document.body.classList.remove("modal-open");
   });
   els.signOffForm.addEventListener("submit", confirmCurrentSignOff);
+  els.signOffHoursInput.addEventListener("keydown", blockInvalidNumberKeys);
+  els.signOffHoursInput.addEventListener("input", handleSignOffHoursInput);
+  els.signOffNoteInput.addEventListener("input", refreshSignOffDraftStatus);
+  els.signOffHourActions.addEventListener("click", handleSignOffHourAction);
   els.signOffClose.addEventListener("click", closeSignOffDialog);
-  els.signOffSkip.addEventListener("click", moveToNextSignOffWorker);
+  els.signOffPrev.addEventListener("click", moveToPreviousSignOffWorker);
+  els.signOffNext.addEventListener("click", moveToNextSignOffWorker);
   els.signOffReopen.addEventListener("click", reopenCurrentSignOff);
   els.signOffPhotoInput.addEventListener("change", previewSignOffPhoto);
+  els.signOffForm.addEventListener("touchstart", handleSignOffTouchStart, { passive: true });
+  els.signOffForm.addEventListener("touchend", handleSignOffTouchEnd, { passive: true });
   els.signOffDialog.addEventListener("click", (event) => {
     if (event.target === els.signOffDialog) closeSignOffDialog();
   });
@@ -543,7 +556,7 @@ function renderDailyReview() {
   const allSigned = stats.total > 0 && stats.signed === stats.total;
   els.dailyReviewStatus.textContent = `Signed ${stats.signed}/${stats.total}`;
   els.dailyReviewStatus.classList.toggle("is-signed", allSigned);
-  els.dailySignOff.textContent = stats.unsigned ? "Start Sign-Off" : "Review Sign-Offs";
+  els.dailySignOff.textContent = stats.total && !stats.unsigned ? "Review Closed Day" : "Sign / Close Day";
   els.dailySignOff.classList.toggle("primary", stats.unsigned > 0);
   els.dailySignOff.classList.toggle("secondary", stats.unsigned === 0);
 }
@@ -800,7 +813,6 @@ function renderSignOffDialog() {
   const parsed = parseHours(dayEntry.hours);
   const signOff = getActiveSignOff(employee.id, selectedDailyDayKey);
   const credential = formatCredential(employee);
-  const canSign = parsed.valid && !parsed.empty && !signOff;
   const explicitZero = parsed.valid && !parsed.empty && parsed.value === 0;
   const statusBadge = signOff
     ? `<span class="badge ok">Signed ${escapeHtml(formatSignedDateTime(signOff.signedAt))}</span>`
@@ -809,10 +821,10 @@ function renderSignOffDialog() {
       : !parsed.valid
         ? `<span class="badge danger">Invalid hours</span>`
         : explicitZero
-          ? `<span class="badge ok">0h ready</span>`
+          ? `<span class="badge warning">Absent</span>`
           : `<span class="badge ok">Ready</span>`;
 
-  els.signOffProgress.textContent = `Worker ${signOffIndex + 1} of ${signOffQueue.length}`;
+  els.signOffProgress.textContent = `${signOffIndex + 1}/${signOffQueue.length}`;
   els.signOffWorkerCard.innerHTML = `
     <div class="signoff-worker-head">
       <div>
@@ -823,20 +835,24 @@ function renderSignOffDialog() {
     </div>
     <dl class="signoff-facts">
       <div><dt>Credential</dt><dd>${escapeHtml(credential || "Not recorded")}</dd></div>
-      <div><dt>Hours</dt><dd>${escapeHtml(dayEntry.hours === "" ? "Blank" : `${dayEntry.hours}h`)}</dd></div>
-      <div><dt>Note</dt><dd>${escapeHtml(dayEntry.note || "None")}</dd></div>
+      <div><dt>Hours</dt><dd data-signoff-fact-hours>${escapeHtml(dayEntry.hours === "" ? "Blank" : `${dayEntry.hours}h`)}</dd></div>
+      <div><dt>Note</dt><dd data-signoff-fact-note>${escapeHtml(dayEntry.note || "None")}</dd></div>
     </dl>
     ${signOff ? `<p class="signoff-lock-note">This row is locked. Reopen sign-off before editing hours or notes.</p>` : ""}
   `;
 
-  els.signOffNotice.textContent = signOff
-    ? "Already signed. Use Reopen only if the hours need changing."
-    : canSign
-      ? "Take a fresh ID-card photo to sign this worker."
-      : "Enter valid hours before signing. Blank hours cannot be signed.";
-  els.signOffPhotoInput.disabled = Boolean(signOff) || !canSign;
-  els.signOffConfirm.disabled = Boolean(signOff) || !canSign;
+  els.signOffHoursInput.value = signOff ? signOff.signedHours : dayEntry.hours;
+  els.signOffNoteInput.value = signOff ? signOff.signedNote : dayEntry.note;
+  els.signOffHoursInput.disabled = Boolean(signOff);
+  els.signOffNoteInput.disabled = Boolean(signOff);
+  els.signOffHourActions.querySelectorAll("button").forEach((button) => {
+    button.disabled = Boolean(signOff);
+  });
+  els.signOffNotice.textContent = getSignOffDraftNotice(parsed, signOff, dayEntry.note);
+  els.signOffPhotoInput.disabled = Boolean(signOff) || (parsed.valid && !parsed.empty && parsed.value === 0);
+  els.signOffConfirm.disabled = Boolean(signOff);
   els.signOffReopen.disabled = !signOff;
+  updateSignOffNavigationButtons();
   resetSignOffPhotoPreview();
 }
 
@@ -849,9 +865,119 @@ function closeSignOffDialog() {
 
 function moveToNextSignOffWorker() {
   if (!signOffQueue.length) return;
-  signOffIndex = (signOffIndex + 1) % signOffQueue.length;
+  if (signOffIndex >= signOffQueue.length - 1) return;
+  signOffIndex += 1;
   signOffPhotoFile = null;
   renderSignOffDialog();
+}
+
+function moveToPreviousSignOffWorker() {
+  if (!signOffQueue.length || signOffIndex <= 0) return;
+  signOffIndex -= 1;
+  signOffPhotoFile = null;
+  renderSignOffDialog();
+}
+
+function updateSignOffNavigationButtons() {
+  els.signOffPrev.disabled = signOffIndex <= 0;
+  els.signOffNext.disabled = signOffIndex >= signOffQueue.length - 1;
+}
+
+function handleSignOffTouchStart(event) {
+  const touch = event.changedTouches?.[0];
+  if (!touch) return;
+  signOffTouchStartX = touch.clientX;
+  signOffTouchStartY = touch.clientY;
+}
+
+function handleSignOffTouchEnd(event) {
+  const touch = event.changedTouches?.[0];
+  if (!touch) return;
+  const deltaX = touch.clientX - signOffTouchStartX;
+  const deltaY = touch.clientY - signOffTouchStartY;
+  if (Math.abs(deltaX) < 70 || Math.abs(deltaX) < Math.abs(deltaY) * 1.5) return;
+  if (deltaX < 0) moveToNextSignOffWorker();
+  else moveToPreviousSignOffWorker();
+}
+
+function handleSignOffHoursInput() {
+  if (els.signOffHoursInput.value.startsWith("-")) {
+    els.signOffHoursInput.value = "";
+  }
+  const parsed = parseHours(els.signOffHoursInput.value);
+  const invalid = els.signOffHoursInput.value.trim() !== "" && !parsed.valid;
+  els.signOffHoursInput.classList.toggle("is-invalid", invalid);
+  refreshSignOffDraftStatus();
+}
+
+function handleSignOffHourAction(event) {
+  const button = event.target.closest("[data-signoff-hours], [data-signoff-step]");
+  if (!button || button.disabled) return;
+
+  if (button.dataset.signoffHours !== undefined) {
+    els.signOffHoursInput.value = formatNumber(Math.max(0, Number(button.dataset.signoffHours) || 0));
+  } else {
+    const parsed = parseHours(els.signOffHoursInput.value);
+    const current = parsed.valid ? parsed.value : 0;
+    const next = Math.max(0, current + Number(button.dataset.signoffStep || 0));
+    els.signOffHoursInput.value = formatNumber(next);
+  }
+
+  els.signOffHoursInput.classList.remove("is-invalid");
+  refreshSignOffDraftStatus();
+  els.signOffHoursInput.focus();
+}
+
+function refreshSignOffDraftStatus() {
+  const employee = signOffQueue[signOffIndex];
+  if (!employee || isEmployeeDaySigned(employee.id, selectedDailyDayKey)) return;
+
+  const parsed = parseHours(els.signOffHoursInput.value);
+  const badges = els.signOffWorkerCard.querySelector(".warning-badges");
+  const hoursFact = els.signOffWorkerCard.querySelector("[data-signoff-fact-hours]");
+  const noteFact = els.signOffWorkerCard.querySelector("[data-signoff-fact-note]");
+
+  if (badges) {
+    badges.innerHTML = !parsed.valid
+      ? `<span class="badge danger">Invalid hours</span>`
+      : parsed.empty
+        ? `<span class="badge warning">Needs hours</span>`
+        : parsed.value === 0
+          ? `<span class="badge warning">Absent</span>`
+        : `<span class="badge ok">Ready</span>`;
+  }
+
+  if (hoursFact) {
+    hoursFact.textContent = !parsed.valid ? "Invalid" : parsed.empty ? "Blank" : `${formatNumber(parsed.value)}h`;
+  }
+
+  if (noteFact) {
+    noteFact.textContent = els.signOffNoteInput.value.trim() || "None";
+  }
+
+  if (els.signOffNotice) {
+    els.signOffNotice.textContent = getSignOffDraftNotice(parsed, null, els.signOffNoteInput.value);
+  }
+
+  const absent = parsed.valid && !parsed.empty && parsed.value === 0;
+  els.signOffPhotoInput.disabled = absent;
+  if (absent && signOffPhotoFile) {
+    signOffPhotoFile = null;
+    resetSignOffPhotoPreview();
+    els.signOffPhotoInput.disabled = true;
+  }
+}
+
+function getSignOffDraftNotice(parsed, signOff, noteValue) {
+  if (signOff) return "Already signed. Use Reopen only if the hours need changing.";
+  if (!parsed.valid) return "Fix the hours value before signing.";
+  if (parsed.empty) return "Enter hours here, take a fresh ID-card photo, then sign this worker.";
+  if (parsed.value === 0) {
+    return String(noteValue || "").trim()
+      ? "Absent today. Photo not required."
+      : "Absent today. Add a note before signing.";
+  }
+  return "Take a fresh ID-card photo, then sign this worker.";
 }
 
 function previewSignOffPhoto() {
@@ -887,40 +1013,55 @@ async function confirmCurrentSignOff(event) {
   }
 
   const dayEntry = getEmployeeEntry(employee.id).days[selectedDailyDayKey];
-  const parsed = parseHours(dayEntry.hours);
+  const parsed = parseHours(els.signOffHoursInput.value);
   if (!parsed.valid || parsed.empty) {
-    els.signOffNotice.textContent = "Enter valid hours before signing. Blank hours cannot be signed.";
+    els.signOffHoursInput.classList.add("is-invalid");
+    els.signOffNotice.textContent = "Enter valid hours before signing. Blank hours cannot be signed. Use 0 for Off.";
     return;
   }
 
-  if (!signOffPhotoFile) {
+  const signedNote = String(els.signOffNoteInput.value || "").trim();
+  const absent = parsed.value === 0;
+  if (absent && !signedNote) {
+    els.signOffNoteInput.focus();
+    els.signOffNotice.textContent = "For 0 hours, add a note explaining why the worker was absent.";
+    return;
+  }
+
+  if (!absent && !signOffPhotoFile) {
     els.signOffNotice.textContent = "Take or choose a fresh ID-card photo for this sign-off.";
     return;
   }
 
   els.signOffConfirm.disabled = true;
-  els.signOffNotice.textContent = "Saving sign-off photo...";
+  els.signOffNotice.textContent = absent ? "Saving absent sign-off..." : "Saving sign-off photo...";
 
   try {
-    const imageRecord = await createImageRecord({
-      kind: "signoff-id-card",
-      employeeId: employee.id,
-      weekKey: getWeekKey(),
-      dayKey: selectedDailyDayKey,
-      file: signOffPhotoFile
-    });
+    let evidenceImageId = "";
+    if (!absent) {
+      const imageRecord = await createImageRecord({
+        kind: "signoff-id-card",
+        employeeId: employee.id,
+        weekKey: getWeekKey(),
+        dayKey: selectedDailyDayKey,
+        file: signOffPhotoFile
+      });
+      evidenceImageId = imageRecord.id;
+    }
     const signedAt = new Date().toISOString();
+    dayEntry.hours = formatNumber(parsed.value);
+    dayEntry.note = signedNote;
     setActiveSignOff(employee.id, selectedDailyDayKey, {
       id: createId(),
       status: "signed",
       signedAt,
       signedHours: formatNumber(parsed.value),
-      signedNote: String(dayEntry.note || ""),
+      signedNote,
       credentialType: employee.credentialType || "",
       credentialId: employee.credentialId || "",
       credentialExpiry: employee.credentialExpiry || "",
       referenceImageId: employee.referenceImageId || "",
-      evidenceImageId: imageRecord.id
+      evidenceImageId
     });
     saveState();
     renderApp();
@@ -928,7 +1069,7 @@ async function confirmCurrentSignOff(event) {
     advanceToNextUnsignedOrClose();
   } catch (error) {
     els.signOffConfirm.disabled = false;
-    els.signOffNotice.textContent = "Could not save the photo. Try a smaller image or check browser storage.";
+    els.signOffNotice.textContent = absent ? "Could not save this sign-off. Check browser storage." : "Could not save the photo. Try a smaller image or check browser storage.";
   }
 }
 
@@ -952,6 +1093,7 @@ function advanceToNextUnsignedOrClose() {
   }
 
   closeSignOffDialog();
+  showDailyNotice("Day closed. All workers are signed.");
 }
 
 function reopenCurrentSignOff() {

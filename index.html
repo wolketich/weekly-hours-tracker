@@ -61,7 +61,7 @@
               <div id="dailyDayButtons" class="segmented-grid daily-days" role="group" aria-label="Choose daily log date"></div>
               <div class="daily-review-row">
                 <span id="dailyReviewStatus" class="review-status">Signed 0/0</span>
-                <button type="button" class="button primary" id="dailySignOff">Start Sign-Off</button>
+                <button type="button" class="button primary" id="dailySignOff">Sign / Close Day</button>
                 <button type="button" class="button secondary" id="printDailySignOff">Print Sign-Off</button>
               </div>
             </div>
@@ -463,19 +463,39 @@
         <div class="dialog-heading">
           <div>
             <p class="section-kicker" id="signOffProgress">Worker 1 of 1</p>
-            <h2 id="signOffDialogTitle">Daily sign-off</h2>
+            <h2 id="signOffDialogTitle">Sign / close day</h2>
           </div>
           <button type="button" class="button tiny secondary dialog-close" id="signOffClose" aria-label="Close sign-off">Close</button>
         </div>
         <section id="signOffWorkerCard" class="signoff-worker-card"></section>
+        <section class="signoff-entry-panel" aria-label="Hours to sign">
+          <label for="signOffHoursInput">
+            Hours to sign
+            <input id="signOffHoursInput" name="signOffHoursInput" type="number" min="0" step="0.25" inputmode="decimal">
+          </label>
+          <div id="signOffHourActions" class="signoff-hour-actions" aria-label="Quick sign-off hours">
+            <button type="button" class="button tiny secondary" data-signoff-hours="0">Off</button>
+            <button type="button" class="button tiny secondary" data-signoff-hours="5">5h</button>
+            <button type="button" class="button tiny secondary" data-signoff-hours="10">10h</button>
+            <button type="button" class="button tiny secondary" data-signoff-step="1">+1</button>
+            <button type="button" class="button tiny secondary" data-signoff-step="-1">-1</button>
+          </div>
+          <label for="signOffNoteInput">
+            Note
+            <textarea id="signOffNoteInput" name="signOffNoteInput" rows="2"></textarea>
+          </label>
+        </section>
         <label class="file-field" for="signOffPhotoInput">
           Fresh ID-card photo
           <input id="signOffPhotoInput" name="signOffPhotoInput" type="file" accept="image/*" capture="environment">
         </label>
         <img id="signOffPhotoPreview" class="photo-preview is-hidden" alt="Selected ID-card preview">
         <p id="signOffNotice" class="inline-notice" role="status" aria-live="polite"></p>
+        <div class="signoff-nav-row" aria-label="Review workers">
+          <button type="button" class="button secondary" id="signOffPrev">Prev</button>
+          <button type="button" class="button secondary" id="signOffNext">Next</button>
+        </div>
         <div class="dialog-actions signoff-actions">
-          <button type="button" class="button secondary" id="signOffSkip">Skip</button>
           <button type="button" class="button secondary" id="signOffReopen">Reopen</button>
           <button type="submit" class="button primary" id="signOffConfirm">Sign worker</button>
         </div>
