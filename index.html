@@ -6,6 +6,7 @@
     <meta name="theme-color" content="#f7f8fa">
     <meta name="description" content="A local weekly hours tracker for daily supervisor entry.">
     <title>Weekly Hours Tracker</title>
+    <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="icons/icon.svg">
     <link rel="stylesheet" href="styles.css">
@@ -59,8 +60,9 @@
               </div>
               <div id="dailyDayButtons" class="segmented-grid daily-days" role="group" aria-label="Choose daily log date"></div>
               <div class="daily-review-row">
-                <span id="dailyReviewStatus" class="review-status">Not signed off</span>
-                <button type="button" class="button secondary" id="dailySignOff">Sign off day</button>
+                <span id="dailyReviewStatus" class="review-status">Signed 0/0</span>
+                <button type="button" class="button primary" id="dailySignOff">Start Sign-Off</button>
+                <button type="button" class="button secondary" id="printDailySignOff">Print Sign-Off</button>
               </div>
             </div>
 
@@ -294,16 +296,37 @@
               <form id="addEmployeeForm" class="employee-form">
                 <label for="employeeName">
                   Name
-                  <input id="employeeName" name="employeeName" type="text" autocomplete="off" required>
+                  <input id="employeeName" name="employeeName" type="text" autocomplete="off">
                 </label>
                 <label for="employeeGroup">
-                  Company or group
+                  Group
                   <input id="employeeGroup" name="employeeGroup" type="text" autocomplete="off" list="employeeGroupOptions">
                 </label>
                 <div id="employeeGroupChoices" class="group-choice-list is-hidden" aria-label="Existing groups"></div>
                 <label for="employeeRole">
-                  Role or note
+                  Note
                   <input id="employeeRole" name="employeeRole" type="text" autocomplete="off">
+                </label>
+                <label for="employeeCredentialType">
+                  Credential
+                  <select id="employeeCredentialType" name="employeeCredentialType">
+                    <option value="">None</option>
+                    <option value="Safety Pass">Safety Pass</option>
+                    <option value="Manual Handling">Manual Handling</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </label>
+                <label for="employeeCredentialId">
+                  Credential ID
+                  <input id="employeeCredentialId" name="employeeCredentialId" type="text" autocomplete="off">
+                </label>
+                <label for="employeeCredentialExpiry">
+                  Expiry
+                  <input id="employeeCredentialExpiry" name="employeeCredentialExpiry" type="date">
+                </label>
+                <label class="file-field" for="employeeReferencePhoto">
+                  Reference ID photo
+                  <input id="employeeReferencePhoto" name="employeeReferencePhoto" type="file" accept="image/*" capture="environment">
                 </label>
                 <button type="submit" class="button primary">Add</button>
               </form>
@@ -373,6 +396,7 @@
         </section>
 
         <section id="printArea" class="print-report" aria-label="Printable weekly report"></section>
+        <section id="dailySignOffPrintArea" class="print-report daily-signoff-print" aria-label="Printable daily sign-off sheet"></section>
       </main>
 
       <button type="button" id="fabAddEmployee" class="fab screen-only" aria-label="Add employee">+ Person</button>
@@ -394,20 +418,66 @@
         </div>
         <label for="modalEmployeeName">
           Name
-          <input id="modalEmployeeName" name="modalEmployeeName" type="text" autocomplete="off" required>
+          <input id="modalEmployeeName" name="modalEmployeeName" type="text" autocomplete="off">
         </label>
         <label for="modalEmployeeGroup">
-          Company or group
+          Group
           <input id="modalEmployeeGroup" name="modalEmployeeGroup" type="text" autocomplete="off" list="employeeGroupOptions">
         </label>
         <div id="modalEmployeeGroupChoices" class="group-choice-list is-hidden" aria-label="Existing groups"></div>
         <label for="modalEmployeeRole">
-          Role or note
+          Note
           <input id="modalEmployeeRole" name="modalEmployeeRole" type="text" autocomplete="off">
+        </label>
+        <label for="modalEmployeeCredentialType">
+          Credential
+          <select id="modalEmployeeCredentialType" name="modalEmployeeCredentialType">
+            <option value="">None</option>
+            <option value="Safety Pass">Safety Pass</option>
+            <option value="Manual Handling">Manual Handling</option>
+            <option value="Other">Other</option>
+          </select>
+        </label>
+        <label for="modalEmployeeCredentialId">
+          Credential ID
+          <input id="modalEmployeeCredentialId" name="modalEmployeeCredentialId" type="text" autocomplete="off">
+        </label>
+        <label for="modalEmployeeCredentialExpiry">
+          Expiry
+          <input id="modalEmployeeCredentialExpiry" name="modalEmployeeCredentialExpiry" type="date">
+        </label>
+        <label class="file-field" for="modalEmployeeReferencePhoto">
+          Reference ID photo
+          <input id="modalEmployeeReferencePhoto" name="modalEmployeeReferencePhoto" type="file" accept="image/*" capture="environment">
         </label>
         <div class="dialog-actions">
           <button type="button" class="button secondary" id="employeeDialogCancel">Cancel</button>
           <button type="submit" class="button primary">Add person</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="signOffDialog" class="employee-dialog signoff-dialog screen-only" aria-labelledby="signOffDialogTitle">
+      <form id="signOffForm" class="employee-dialog-card signoff-card">
+        <div class="dialog-handle" aria-hidden="true"></div>
+        <div class="dialog-heading">
+          <div>
+            <p class="section-kicker" id="signOffProgress">Worker 1 of 1</p>
+            <h2 id="signOffDialogTitle">Daily sign-off</h2>
+          </div>
+          <button type="button" class="button tiny secondary dialog-close" id="signOffClose" aria-label="Close sign-off">Close</button>
+        </div>
+        <section id="signOffWorkerCard" class="signoff-worker-card"></section>
+        <label class="file-field" for="signOffPhotoInput">
+          Fresh ID-card photo
+          <input id="signOffPhotoInput" name="signOffPhotoInput" type="file" accept="image/*" capture="environment">
+        </label>
+        <img id="signOffPhotoPreview" class="photo-preview is-hidden" alt="Selected ID-card preview">
+        <p id="signOffNotice" class="inline-notice" role="status" aria-live="polite"></p>
+        <div class="dialog-actions signoff-actions">
+          <button type="button" class="button secondary" id="signOffSkip">Skip</button>
+          <button type="button" class="button secondary" id="signOffReopen">Reopen</button>
+          <button type="submit" class="button primary" id="signOffConfirm">Sign worker</button>
         </div>
       </form>
     </dialog>

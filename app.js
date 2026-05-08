@@ -1,10 +1,16 @@
 "use strict";
 
 const STORAGE_KEY = "weeklyHoursTracker:v1";
+const IMAGE_DB_NAME = "weeklyHoursTrackerImages:v1";
+const IMAGE_DB_VERSION = 1;
+const IMAGE_STORE_NAME = "images";
+const IMAGE_MAX_SIZE = 720;
+const IMAGE_QUALITY = 0.74;
 const DEFAULT_THRESHOLD = 40;
 const VALID_TABS = ["today", "week", "people", "settings"];
 const VALID_DAILY_FILTERS = ["all", "missing", "entered"];
 const DEFAULT_NOTE_TEMPLATES = ["Rain delay", "Left early"];
+const CREDENTIAL_TYPES = ["Safety Pass", "Manual Handling", "Other"];
 
 const DAYS = [
   { key: "monday", label: "Monday", short: "Mon" },
@@ -76,6 +82,9 @@ const dailyPeopleFill = {
   applyAll: false,
   employeeIds: new Set()
 };
+let signOffQueue = [];
+let signOffIndex = 0;
+let signOffPhotoFile = null;
 
 document.addEventListener("DOMContentLoaded", init);
 
@@ -118,6 +127,7 @@ function cacheElements() {
   els.dailyProgress = document.getElementById("dailyProgress");
   els.dailyReviewStatus = document.getElementById("dailyReviewStatus");
   els.dailySignOff = document.getElementById("dailySignOff");
+  els.printDailySignOff = document.getElementById("printDailySignOff");
   els.dailyAllCustom = document.getElementById("dailyAllCustom");
   els.dailyApplyCustom = document.getElementById("dailyApplyCustom");
   els.dailyCopyYesterday = document.getElementById("dailyCopyYesterday");
@@ -161,14 +171,33 @@ function cacheElements() {
   els.employeeGroupOptions = document.getElementById("employeeGroupOptions");
   els.employeeGroupChoices = document.getElementById("employeeGroupChoices");
   els.employeeRole = document.getElementById("employeeRole");
+  els.employeeCredentialType = document.getElementById("employeeCredentialType");
+  els.employeeCredentialId = document.getElementById("employeeCredentialId");
+  els.employeeCredentialExpiry = document.getElementById("employeeCredentialExpiry");
+  els.employeeReferencePhoto = document.getElementById("employeeReferencePhoto");
   els.employeeDialog = document.getElementById("employeeDialog");
   els.employeeDialogForm = document.getElementById("employeeDialogForm");
   els.modalEmployeeName = document.getElementById("modalEmployeeName");
   els.modalEmployeeGroup = document.getElementById("modalEmployeeGroup");
   els.modalEmployeeGroupChoices = document.getElementById("modalEmployeeGroupChoices");
   els.modalEmployeeRole = document.getElementById("modalEmployeeRole");
+  els.modalEmployeeCredentialType = document.getElementById("modalEmployeeCredentialType");
+  els.modalEmployeeCredentialId = document.getElementById("modalEmployeeCredentialId");
+  els.modalEmployeeCredentialExpiry = document.getElementById("modalEmployeeCredentialExpiry");
+  els.modalEmployeeReferencePhoto = document.getElementById("modalEmployeeReferencePhoto");
   els.employeeDialogClose = document.getElementById("employeeDialogClose");
   els.employeeDialogCancel = document.getElementById("employeeDialogCancel");
+  els.signOffDialog = document.getElementById("signOffDialog");
+  els.signOffForm = document.getElementById("signOffForm");
+  els.signOffProgress = document.getElementById("signOffProgress");
+  els.signOffWorkerCard = document.getElementById("signOffWorkerCard");
+  els.signOffPhotoInput = document.getElementById("signOffPhotoInput");
+  els.signOffPhotoPreview = document.getElementById("signOffPhotoPreview");
+  els.signOffNotice = document.getElementById("signOffNotice");
+  els.signOffClose = document.getElementById("signOffClose");
+  els.signOffSkip = document.getElementById("signOffSkip");
+  els.signOffReopen = document.getElementById("signOffReopen");
+  els.signOffConfirm = document.getElementById("signOffConfirm");
   els.peopleList = document.getElementById("peopleList");
   els.thresholdInput = document.getElementById("thresholdInput");
   els.noteTemplateInput = document.getElementById("noteTemplateInput");
@@ -182,6 +211,7 @@ function cacheElements() {
   els.exportCsv = document.getElementById("exportCsv");
   els.printReport = document.getElementById("printReport");
   els.printArea = document.getElementById("printArea");
+  els.dailySignOffPrintArea = document.getElementById("dailySignOffPrintArea");
   els.fabAddEmployee = document.getElementById("fabAddEmployee");
 }
 
@@ -211,7 +241,8 @@ function bindEvents() {
   document.addEventListener("click", handleGroupChoiceClick);
 
   els.dailyDayButtons.addEventListener("click", handleDailyDayClick);
-  els.dailySignOff.addEventListener("click", toggleDailySignOff);
+  els.dailySignOff.addEventListener("click", startSignOffFlow);
+  els.printDailySignOff.addEventListener("click", printDailySignOffSheet);
   els.dailyAllCustom.addEventListener("keydown", blockInvalidNumberKeys);
   els.dailyAllCustom.addEventListener("input", () => {
     if (els.dailyAllCustom.value.startsWith("-")) {
@@ -278,7 +309,20 @@ function bindEvents() {
   els.employeeDialog.addEventListener("close", () => {
     document.body.classList.remove("modal-open");
   });
+  els.signOffForm.addEventListener("submit", confirmCurrentSignOff);
+  els.signOffClose.addEventListener("click", closeSignOffDialog);
+  els.signOffSkip.addEventListener("click", moveToNextSignOffWorker);
+  els.signOffReopen.addEventListener("click", reopenCurrentSignOff);
+  els.signOffPhotoInput.addEventListener("change", previewSignOffPhoto);
+  els.signOffDialog.addEventListener("click", (event) => {
+    if (event.target === els.signOffDialog) closeSignOffDialog();
+  });
+  els.signOffDialog.addEventListener("close", () => {
+    signOffPhotoFile = null;
+    document.body.classList.remove("modal-open");
+  });
   els.peopleList.addEventListener("input", handlePeopleInput);
+  els.peopleList.addEventListener("change", handlePeopleChange);
   els.peopleList.addEventListener("click", handlePeopleClick);
   els.peopleList.addEventListener("toggle", handlePeopleToggle, true);
 
@@ -300,11 +344,18 @@ function bindEvents() {
   els.exportCsv.addEventListener("click", exportCsv);
   els.printReport.addEventListener("click", () => {
     renderPrintReport();
+    document.body.dataset.printMode = "weekly";
     window.print();
   });
   els.fabAddEmployee.addEventListener("click", openEmployeeDialog);
 
-  window.addEventListener("beforeprint", renderPrintReport);
+  window.addEventListener("beforeprint", () => {
+    if (!document.body.dataset.printMode) document.body.dataset.printMode = "weekly";
+    renderPrintReport();
+  });
+  window.addEventListener("afterprint", () => {
+    delete document.body.dataset.printMode;
+  });
 }
 
 function renderApp() {
@@ -426,12 +477,14 @@ function renderDailyLog() {
     els.dailyApplySelected.disabled = true;
     els.dailyCopyYesterday.disabled = true;
     els.dailySignOff.disabled = true;
+    els.printDailySignOff.disabled = true;
     return;
   }
 
   els.dailyApplyCustom.disabled = false;
   els.dailyApplySelected.disabled = false;
   els.dailySignOff.disabled = false;
+  els.printDailySignOff.disabled = false;
   els.dailyCopyYesterday.disabled = !hasYesterdayData();
   const employees = getFilteredDailyEmployees();
   if (!employees.length) {
@@ -486,13 +539,13 @@ function renderDailyProgress() {
 }
 
 function renderDailyReview() {
-  const review = getDayReview(selectedDailyDayKey);
-  const signed = Boolean(review.signed);
-  els.dailyReviewStatus.textContent = signed ? `Signed off ${formatSignedTime(review.signedAt)}` : "Not signed off";
-  els.dailyReviewStatus.classList.toggle("is-signed", signed);
-  els.dailySignOff.textContent = signed ? "Undo sign-off" : "Sign off day";
-  els.dailySignOff.classList.toggle("primary", !signed);
-  els.dailySignOff.classList.toggle("secondary", signed);
+  const stats = getDailySignOffStats(selectedDailyDayKey);
+  const allSigned = stats.total > 0 && stats.signed === stats.total;
+  els.dailyReviewStatus.textContent = `Signed ${stats.signed}/${stats.total}`;
+  els.dailyReviewStatus.classList.toggle("is-signed", allSigned);
+  els.dailySignOff.textContent = stats.unsigned ? "Start Sign-Off" : "Review Sign-Offs";
+  els.dailySignOff.classList.toggle("primary", stats.unsigned > 0);
+  els.dailySignOff.classList.toggle("secondary", stats.unsigned === 0);
 }
 
 function renderDailyRosterTools() {
@@ -570,7 +623,7 @@ function findFirstMissingDailyEmployee() {
 }
 
 function getEmployeeSearchText(employee) {
-  return `${displayEmployeeName(employee)} ${displayEmployeeGroup(employee)} ${employee.role || ""}`.toLowerCase();
+  return `${displayEmployeeName(employee)} ${displayEmployeeGroup(employee)} ${employee.role || ""} ${employee.credentialType || ""} ${employee.credentialId || ""}`.toLowerCase();
 }
 
 function getDailyEntryStatus(employeeId) {
@@ -622,19 +675,21 @@ function createDailyRow(employee) {
   const dayEntry = getEmployeeEntry(employee.id).days[selectedDailyDayKey];
   const parsed = parseHours(dayEntry.hours);
   const status = getDailyEntryStatus(employee.id);
+  const signed = isEmployeeDaySigned(employee.id, selectedDailyDayKey);
   const noteKey = getNoteKey(employee.id, selectedDailyDayKey);
   const noteOpen = openNotes.has(noteKey);
   const row = document.createElement("details");
-  row.className = `daily-row daily-details${status === "missing" ? " has-missing" : ""}${status === "invalid" ? " has-invalid" : ""}`;
+  row.className = `daily-row daily-details${status === "missing" ? " has-missing" : ""}${status === "invalid" ? " has-invalid" : ""}${signed ? " is-signed" : ""}`;
   row.dataset.employeeId = employee.id;
   row.dataset.dailyStatus = status;
   row.open = expandedDailyEmployeeId === employee.id || noteOpen;
+  const disabled = signed ? " disabled" : "";
   row.innerHTML = `
     <summary class="daily-summary">
       <div>
         <strong>${escapeHtml(displayEmployeeName(employee))}</strong>
         <span>${escapeHtml(displayEmployeeGroup(employee))}${employee.role ? ` - ${escapeHtml(employee.role)}` : ""}</span>
-        <div class="warning-badges">${renderDailyEntryBadge(parsed)}</div>
+        <div class="warning-badges">${renderDailyEntryBadge(parsed, signed)}</div>
       </div>
       <div class="daily-summary-hours">
         <strong>${escapeHtml(dayEntry.hours === "" ? "0" : dayEntry.hours)}h</strong>
@@ -645,34 +700,36 @@ function createDailyRow(employee) {
       <div class="daily-hours">
         <label>
           Hours
-          <input type="number" min="0" step="0.25" inputmode="decimal" value="${escapeAttr(dayEntry.hours)}" data-daily-hours data-employee-id="${escapeAttr(employee.id)}">
+          <input type="number" min="0" step="0.25" inputmode="decimal" value="${escapeAttr(dayEntry.hours)}" data-daily-hours data-employee-id="${escapeAttr(employee.id)}"${disabled}>
         </label>
       </div>
       <div class="daily-row-actions">
-        <button type="button" class="button tiny secondary" data-daily-action="preset" data-hours="0" data-employee-id="${escapeAttr(employee.id)}">Off</button>
-        <button type="button" class="button tiny secondary" data-daily-action="preset" data-hours="5" data-employee-id="${escapeAttr(employee.id)}">5h</button>
-        <button type="button" class="button tiny secondary" data-daily-action="preset" data-hours="10" data-employee-id="${escapeAttr(employee.id)}">10h</button>
-        <button type="button" class="button tiny secondary" data-daily-action="step" data-step="1" data-employee-id="${escapeAttr(employee.id)}">+1</button>
-        <button type="button" class="button tiny secondary" data-daily-action="step" data-step="-1" data-employee-id="${escapeAttr(employee.id)}">-1</button>
+        <button type="button" class="button tiny secondary" data-daily-action="preset" data-hours="0" data-employee-id="${escapeAttr(employee.id)}"${disabled}>Off</button>
+        <button type="button" class="button tiny secondary" data-daily-action="preset" data-hours="5" data-employee-id="${escapeAttr(employee.id)}"${disabled}>5h</button>
+        <button type="button" class="button tiny secondary" data-daily-action="preset" data-hours="10" data-employee-id="${escapeAttr(employee.id)}"${disabled}>10h</button>
+        <button type="button" class="button tiny secondary" data-daily-action="step" data-step="1" data-employee-id="${escapeAttr(employee.id)}"${disabled}>+1</button>
+        <button type="button" class="button tiny secondary" data-daily-action="step" data-step="-1" data-employee-id="${escapeAttr(employee.id)}"${disabled}>-1</button>
       </div>
       <button type="button" class="button tiny secondary" data-daily-action="toggle-note" data-employee-id="${escapeAttr(employee.id)}">
         ${noteOpen ? "Hide note" : dayEntry.note ? "Edit note" : "Add note"}
       </button>
+      ${signed ? `<button type="button" class="button tiny secondary" data-daily-action="reopen-signoff" data-employee-id="${escapeAttr(employee.id)}">Reopen sign-off</button>` : ""}
       <div class="note-wrap${noteOpen ? " is-open" : ""}">
         ${renderNoteTemplateButtons(employee.id, selectedDailyDayKey, "daily")}
         <label>
           Note
-          <textarea rows="2" data-daily-note data-employee-id="${escapeAttr(employee.id)}">${escapeHtml(dayEntry.note)}</textarea>
+          <textarea rows="2" data-daily-note data-employee-id="${escapeAttr(employee.id)}"${disabled}>${escapeHtml(dayEntry.note)}</textarea>
         </label>
-        <button type="button" class="button tiny secondary" data-daily-action="save-note-template" data-employee-id="${escapeAttr(employee.id)}">Save note as template</button>
+        <button type="button" class="button tiny secondary" data-daily-action="save-note-template" data-employee-id="${escapeAttr(employee.id)}"${disabled}>Save note as template</button>
       </div>
     </div>
   `;
   return row;
 }
 
-function renderDailyEntryBadge(parsed) {
+function renderDailyEntryBadge(parsed, signed = false) {
   if (!parsed.valid) return `<span class="badge danger">Invalid</span>`;
+  if (signed) return `<span class="badge ok">Signed</span>`;
   if (parsed.empty) return `<span class="badge warning">Missing</span>`;
   return `<span class="badge ok">Entered</span>`;
 }
@@ -709,19 +766,204 @@ function handleDailyDayClick(event) {
   renderApp();
 }
 
-function toggleDailySignOff() {
-  const review = getDayReview(selectedDailyDayKey);
-  if (review.signed) {
-    review.signed = false;
-    review.signedAt = "";
-    showDailyNotice(`${dayByKey(selectedDailyDayKey).short} sign-off removed.`);
-  } else {
-    review.signed = true;
-    review.signedAt = new Date().toISOString();
-    showDailyNotice(`${dayByKey(selectedDailyDayKey).short} signed off.`);
+function startSignOffFlow() {
+  const employees = getActiveEmployees();
+  if (!employees.length) {
+    showDailyNotice("Add employees before starting sign-off.");
+    return;
   }
+
+  signOffQueue = employees;
+  const firstUnsigned = signOffQueue.findIndex((employee) => !isEmployeeDaySigned(employee.id, selectedDailyDayKey));
+  signOffIndex = firstUnsigned >= 0 ? firstUnsigned : 0;
+  signOffPhotoFile = null;
+  if (els.signOffPhotoInput) els.signOffPhotoInput.value = "";
+  renderSignOffDialog();
+
+  if (!els.signOffDialog.showModal) {
+    showDailyNotice("This browser does not support the sign-off sheet dialog.");
+    return;
+  }
+
+  document.body.classList.add("modal-open");
+  els.signOffDialog.showModal();
+}
+
+function renderSignOffDialog() {
+  const employee = signOffQueue[signOffIndex];
+  if (!employee) {
+    closeSignOffDialog();
+    return;
+  }
+
+  const dayEntry = getEmployeeEntry(employee.id).days[selectedDailyDayKey];
+  const parsed = parseHours(dayEntry.hours);
+  const signOff = getActiveSignOff(employee.id, selectedDailyDayKey);
+  const credential = formatCredential(employee);
+  const canSign = parsed.valid && !parsed.empty && !signOff;
+  const explicitZero = parsed.valid && !parsed.empty && parsed.value === 0;
+  const statusBadge = signOff
+    ? `<span class="badge ok">Signed ${escapeHtml(formatSignedDateTime(signOff.signedAt))}</span>`
+    : parsed.empty
+      ? `<span class="badge warning">Blank hours</span>`
+      : !parsed.valid
+        ? `<span class="badge danger">Invalid hours</span>`
+        : explicitZero
+          ? `<span class="badge ok">0h ready</span>`
+          : `<span class="badge ok">Ready</span>`;
+
+  els.signOffProgress.textContent = `Worker ${signOffIndex + 1} of ${signOffQueue.length}`;
+  els.signOffWorkerCard.innerHTML = `
+    <div class="signoff-worker-head">
+      <div>
+        <strong>${escapeHtml(displayEmployeeName(employee))}</strong>
+        <span>${escapeHtml(displayEmployeeGroup(employee))}</span>
+      </div>
+      <div class="warning-badges">${statusBadge}</div>
+    </div>
+    <dl class="signoff-facts">
+      <div><dt>Credential</dt><dd>${escapeHtml(credential || "Not recorded")}</dd></div>
+      <div><dt>Hours</dt><dd>${escapeHtml(dayEntry.hours === "" ? "Blank" : `${dayEntry.hours}h`)}</dd></div>
+      <div><dt>Note</dt><dd>${escapeHtml(dayEntry.note || "None")}</dd></div>
+    </dl>
+    ${signOff ? `<p class="signoff-lock-note">This row is locked. Reopen sign-off before editing hours or notes.</p>` : ""}
+  `;
+
+  els.signOffNotice.textContent = signOff
+    ? "Already signed. Use Reopen only if the hours need changing."
+    : canSign
+      ? "Take a fresh ID-card photo to sign this worker."
+      : "Enter valid hours before signing. Blank hours cannot be signed.";
+  els.signOffPhotoInput.disabled = Boolean(signOff) || !canSign;
+  els.signOffConfirm.disabled = Boolean(signOff) || !canSign;
+  els.signOffReopen.disabled = !signOff;
+  resetSignOffPhotoPreview();
+}
+
+function closeSignOffDialog() {
+  if (els.signOffDialog.open) els.signOffDialog.close();
+  signOffPhotoFile = null;
+  resetSignOffPhotoPreview();
+  document.body.classList.remove("modal-open");
+}
+
+function moveToNextSignOffWorker() {
+  if (!signOffQueue.length) return;
+  signOffIndex = (signOffIndex + 1) % signOffQueue.length;
+  signOffPhotoFile = null;
+  renderSignOffDialog();
+}
+
+function previewSignOffPhoto() {
+  signOffPhotoFile = els.signOffPhotoInput.files?.[0] || null;
+  if (!signOffPhotoFile) {
+    resetSignOffPhotoPreview();
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.addEventListener("load", () => {
+    els.signOffPhotoPreview.src = String(reader.result || "");
+    els.signOffPhotoPreview.classList.remove("is-hidden");
+  });
+  reader.readAsDataURL(signOffPhotoFile);
+}
+
+function resetSignOffPhotoPreview() {
+  if (!els.signOffPhotoPreview) return;
+  els.signOffPhotoPreview.removeAttribute("src");
+  els.signOffPhotoPreview.classList.add("is-hidden");
+  if (els.signOffPhotoInput) els.signOffPhotoInput.value = "";
+}
+
+async function confirmCurrentSignOff(event) {
+  event.preventDefault();
+  const employee = signOffQueue[signOffIndex];
+  if (!employee) return;
+
+  if (isEmployeeDaySigned(employee.id, selectedDailyDayKey)) {
+    els.signOffNotice.textContent = "This worker is already signed.";
+    return;
+  }
+
+  const dayEntry = getEmployeeEntry(employee.id).days[selectedDailyDayKey];
+  const parsed = parseHours(dayEntry.hours);
+  if (!parsed.valid || parsed.empty) {
+    els.signOffNotice.textContent = "Enter valid hours before signing. Blank hours cannot be signed.";
+    return;
+  }
+
+  if (!signOffPhotoFile) {
+    els.signOffNotice.textContent = "Take or choose a fresh ID-card photo for this sign-off.";
+    return;
+  }
+
+  els.signOffConfirm.disabled = true;
+  els.signOffNotice.textContent = "Saving sign-off photo...";
+
+  try {
+    const imageRecord = await createImageRecord({
+      kind: "signoff-id-card",
+      employeeId: employee.id,
+      weekKey: getWeekKey(),
+      dayKey: selectedDailyDayKey,
+      file: signOffPhotoFile
+    });
+    const signedAt = new Date().toISOString();
+    setActiveSignOff(employee.id, selectedDailyDayKey, {
+      id: createId(),
+      status: "signed",
+      signedAt,
+      signedHours: formatNumber(parsed.value),
+      signedNote: String(dayEntry.note || ""),
+      credentialType: employee.credentialType || "",
+      credentialId: employee.credentialId || "",
+      credentialExpiry: employee.credentialExpiry || "",
+      referenceImageId: employee.referenceImageId || "",
+      evidenceImageId: imageRecord.id
+    });
+    saveState();
+    renderApp();
+    showDailyNotice(`${displayEmployeeName(employee)} signed.`);
+    advanceToNextUnsignedOrClose();
+  } catch (error) {
+    els.signOffConfirm.disabled = false;
+    els.signOffNotice.textContent = "Could not save the photo. Try a smaller image or check browser storage.";
+  }
+}
+
+function advanceToNextUnsignedOrClose() {
+  const nextIndex = signOffQueue.findIndex((employee, index) =>
+    index > signOffIndex && !isEmployeeDaySigned(employee.id, selectedDailyDayKey)
+  );
+  if (nextIndex >= 0) {
+    signOffIndex = nextIndex;
+    signOffPhotoFile = null;
+    renderSignOffDialog();
+    return;
+  }
+
+  const earlierIndex = signOffQueue.findIndex((employee) => !isEmployeeDaySigned(employee.id, selectedDailyDayKey));
+  if (earlierIndex >= 0) {
+    signOffIndex = earlierIndex;
+    signOffPhotoFile = null;
+    renderSignOffDialog();
+    return;
+  }
+
+  closeSignOffDialog();
+}
+
+function reopenCurrentSignOff() {
+  const employee = signOffQueue[signOffIndex];
+  if (!employee) return;
+  const confirmed = window.confirm(`Reopen sign-off for ${displayEmployeeName(employee)}? The signed snapshot stays in history as voided and this worker must sign again after edits.`);
+  if (!confirmed) return;
+  voidSignOff(employee.id, selectedDailyDayKey);
   saveState();
   renderApp();
+  showDailyNotice(`${displayEmployeeName(employee)} sign-off reopened.`);
+  renderSignOffDialog();
 }
 
 function applyDailyHoursToEveryone(hours) {
@@ -731,13 +973,19 @@ function applyDailyHoursToEveryone(hours) {
     return;
   }
 
+  let updatedCount = 0;
+  let skippedCount = 0;
   activeEmployees.forEach((employee) => {
-    getEmployeeEntry(employee.id).days[selectedDailyDayKey].hours = formatNumber(Math.max(0, Number(hours) || 0));
+    if (setEmployeeDayHours(employee.id, selectedDailyDayKey, hours)) updatedCount += 1;
+    else skippedCount += 1;
   });
-  clearDayReview(selectedDailyDayKey);
+  if (!updatedCount) {
+    showDailyNotice(skippedCount ? "Signed rows are locked. Reopen sign-off before editing." : "No people updated.");
+    return;
+  }
   saveState();
   renderApp();
-  showDailyNotice(`${activeEmployees.length} ${activeEmployees.length === 1 ? "person" : "people"} updated for ${dayByKey(selectedDailyDayKey).short}.`);
+  showDailyNotice(`${updatedCount} ${updatedCount === 1 ? "person" : "people"} updated${skippedCount ? `, ${skippedCount} signed row${skippedCount === 1 ? "" : "s"} skipped` : ""}.`);
 }
 
 function applyDailyHoursToGroup(groupLabel, hours) {
@@ -747,13 +995,19 @@ function applyDailyHoursToGroup(groupLabel, hours) {
     return;
   }
 
+  let updatedCount = 0;
+  let skippedCount = 0;
   employees.forEach((employee) => {
-    getEmployeeEntry(employee.id).days[selectedDailyDayKey].hours = formatNumber(Math.max(0, Number(hours) || 0));
+    if (setEmployeeDayHours(employee.id, selectedDailyDayKey, hours)) updatedCount += 1;
+    else skippedCount += 1;
   });
-  clearDayReview(selectedDailyDayKey);
+  if (!updatedCount) {
+    showDailyNotice("All rows in this group are signed and locked.");
+    return;
+  }
   saveState();
   renderApp();
-  showDailyNotice(`${groupLabel}: ${employees.length} ${employees.length === 1 ? "person" : "people"} updated.`);
+  showDailyNotice(`${groupLabel}: ${updatedCount} updated${skippedCount ? `, ${skippedCount} signed skipped` : ""}.`);
 }
 
 function applyDailyCustomToEveryone() {
@@ -775,6 +1029,7 @@ function copyYesterdayToSelectedDay() {
   getActiveEmployees().forEach((employee) => {
     const source = state.weeks[previous.weekKey]?.entries?.[employee.id]?.days?.[previous.dayKey];
     if (!source) return;
+    if (!canEditEmployeeDay(employee.id, selectedDailyDayKey)) return;
     getEmployeeEntry(employee.id).days[selectedDailyDayKey] = {
       hours: source.hours === undefined || source.hours === null ? "" : String(source.hours),
       note: typeof source.note === "string" ? source.note : ""
@@ -849,13 +1104,19 @@ function applyDailyCustomToSelectedPeople() {
     return;
   }
 
+  let updatedCount = 0;
+  let skippedCount = 0;
   employeeIds.forEach((employeeId) => {
-    getEmployeeEntry(employeeId).days[selectedDailyDayKey].hours = formatNumber(parsed.value);
+    if (setEmployeeDayHours(employeeId, selectedDailyDayKey, parsed.value)) updatedCount += 1;
+    else skippedCount += 1;
   });
-  clearDayReview(selectedDailyDayKey);
+  if (!updatedCount) {
+    showDailyNotice("Selected rows are signed and locked.");
+    return;
+  }
   saveState();
   renderApp();
-  showDailyNotice(`${employeeIds.length} ${employeeIds.length === 1 ? "person" : "people"} updated.`);
+  showDailyNotice(`${updatedCount} updated${skippedCount ? `, ${skippedCount} signed skipped` : ""}.`);
 }
 
 function getDailySelectedEmployeeIds() {
@@ -878,6 +1139,10 @@ function handleDailyRosterClick(event) {
 
   const templateButton = event.target.closest("[data-note-template]");
   if (templateButton) {
+    if (!canEditEmployeeDay(templateButton.dataset.employeeId, selectedDailyDayKey)) {
+      showDailyNotice("This row is signed and locked. Reopen sign-off before editing.");
+      return;
+    }
     applyNoteTemplate(templateButton.dataset.employeeId, selectedDailyDayKey, templateButton.dataset.noteTemplate);
     return;
   }
@@ -900,6 +1165,15 @@ function handleDailyRosterClick(event) {
     else openNotes.add(noteKey);
     expandedDailyEmployeeId = employeeId;
     renderDailyLog();
+  }
+  if (button.dataset.dailyAction === "reopen-signoff") {
+    const employee = state.employees.find((item) => item.id === employeeId);
+    const confirmed = window.confirm(`Reopen sign-off for ${employee ? displayEmployeeName(employee) : "this worker"}? The signed snapshot stays in history as voided.`);
+    if (!confirmed) return;
+    voidSignOff(employeeId, selectedDailyDayKey);
+    saveState();
+    renderApp();
+    showDailyNotice("Sign-off reopened. Edit the row, then sign again.");
   }
   if (button.dataset.dailyAction === "save-note-template") {
     addNoteTemplate(getEmployeeEntry(employeeId).days[selectedDailyDayKey].note);
@@ -935,6 +1209,11 @@ function handleDailyRosterInput(event) {
   if (!employeeId) return;
 
   if (target.matches("[data-daily-hours]")) {
+    if (!canEditEmployeeDay(employeeId, selectedDailyDayKey)) {
+      target.value = getEmployeeEntry(employeeId).days[selectedDailyDayKey].hours;
+      showDailyNotice("This row is signed and locked. Reopen sign-off before editing.");
+      return;
+    }
     if (target.value.startsWith("-")) target.value = "";
     getEmployeeEntry(employeeId).days[selectedDailyDayKey].hours = target.value;
     expandedDailyEmployeeId = employeeId;
@@ -950,6 +1229,11 @@ function handleDailyRosterInput(event) {
   }
 
   if (target.matches("[data-daily-note]")) {
+    if (!canEditEmployeeDay(employeeId, selectedDailyDayKey)) {
+      target.value = getEmployeeEntry(employeeId).days[selectedDailyDayKey].note;
+      showDailyNotice("This row is signed and locked. Reopen sign-off before editing.");
+      return;
+    }
     getEmployeeEntry(employeeId).days[selectedDailyDayKey].note = target.value;
     expandedDailyEmployeeId = employeeId;
     clearDayReview(selectedDailyDayKey);
@@ -967,20 +1251,25 @@ function handleDailyRosterKeydown(event) {
 }
 
 function setDailyEmployeeHours(employeeId, hours) {
-  getEmployeeEntry(employeeId).days[selectedDailyDayKey].hours = formatNumber(Math.max(0, Number(hours) || 0));
+  if (!setEmployeeDayHours(employeeId, selectedDailyDayKey, hours)) {
+    showDailyNotice("This row is signed and locked. Reopen sign-off before editing.");
+    return;
+  }
   expandedDailyEmployeeId = employeeId;
-  clearDayReview(selectedDailyDayKey);
   saveState();
   renderApp();
 }
 
 function stepDailyEmployeeHours(employeeId, step) {
+  if (!canEditEmployeeDay(employeeId, selectedDailyDayKey)) {
+    showDailyNotice("This row is signed and locked. Reopen sign-off before editing.");
+    return;
+  }
   const dayEntry = getEmployeeEntry(employeeId).days[selectedDailyDayKey];
   const parsed = parseHours(dayEntry.hours);
   const current = parsed.valid ? parsed.value : 0;
   dayEntry.hours = formatNumber(Math.max(0, current + step));
   expandedDailyEmployeeId = employeeId;
-  clearDayReview(selectedDailyDayKey);
   saveState();
   renderApp();
 }
@@ -995,7 +1284,7 @@ function updateDailyRow(row, employeeId) {
   row.classList.toggle("has-missing", status === "missing");
   row.classList.toggle("has-invalid", status === "invalid");
   if (badges) {
-    badges.innerHTML = renderDailyEntryBadge(parsed);
+    badges.innerHTML = renderDailyEntryBadge(parsed, isEmployeeDaySigned(employeeId, selectedDailyDayKey));
   }
   if (summaryHours) {
     const hours = getEmployeeEntry(employeeId).days[selectedDailyDayKey].hours;
@@ -1110,12 +1399,16 @@ function applyQuickFill() {
     return;
   }
 
-  setEmployeeDays(employeeId, days, hours.value);
+  const result = setEmployeeDays(employeeId, days, hours.value);
+  if (!result.updated) {
+    showQuickNotice("Selected days are signed and locked.");
+    return;
+  }
   clearDayReviews(days);
   expandedEmployeeId = employeeId;
   saveState();
   renderApp();
-  showQuickNotice("Quick Fill applied.");
+  showQuickNotice(`Quick Fill applied${result.skipped ? `, ${result.skipped} signed day${result.skipped === 1 ? "" : "s"} skipped` : ""}.`);
 }
 
 function getQuickPresetHours() {
@@ -1264,12 +1557,22 @@ function applyBulkFill() {
     return;
   }
 
-  employeeIds.forEach((employeeId) => setEmployeeDays(employeeId, days, hours.value));
+  let updatedCount = 0;
+  let skippedCount = 0;
+  employeeIds.forEach((employeeId) => {
+    const result = setEmployeeDays(employeeId, days, hours.value);
+    if (result.updated) updatedCount += 1;
+    skippedCount += result.skipped;
+  });
+  if (!updatedCount) {
+    showBulkNotice("Selected rows are signed and locked.");
+    return;
+  }
   clearDayReviews(days);
   expandedEmployeeId = employeeIds[0] || expandedEmployeeId;
   saveState();
   renderApp();
-  showBulkNotice(`${employeeIds.length} ${employeeIds.length === 1 ? "person" : "people"} updated.`);
+  showBulkNotice(`${updatedCount} ${updatedCount === 1 ? "person" : "people"} updated${skippedCount ? `, ${skippedCount} signed day${skippedCount === 1 ? "" : "s"} skipped` : ""}.`);
 }
 
 function getBulkPresetHours() {
@@ -1401,10 +1704,13 @@ function renderDayEntry(employeeId, day, index) {
   const noteKey = getNoteKey(employeeId, day.key);
   const noteOpen = openNotes.has(noteKey);
   const dayDate = addDays(selectedWeekStart, index);
+  const signed = isEmployeeDaySigned(employeeId, day.key);
+  const disabled = signed ? " disabled" : "";
   const classes = [
     "day-entry",
     parsed.empty ? "has-missing" : "",
-    !parsed.valid ? "has-invalid" : ""
+    !parsed.valid ? "has-invalid" : "",
+    signed ? "is-signed" : ""
   ].filter(Boolean).join(" ");
 
   return `
@@ -1417,29 +1723,31 @@ function renderDayEntry(employeeId, day, index) {
         <div class="day-value">
           <label>
             Hours
-            <input type="number" min="0" step="0.25" inputmode="decimal" value="${escapeAttr(dayEntry.hours)}" data-hour-input data-employee-id="${escapeAttr(employeeId)}" data-day="${day.key}">
+            <input type="number" min="0" step="0.25" inputmode="decimal" value="${escapeAttr(dayEntry.hours)}" data-hour-input data-employee-id="${escapeAttr(employeeId)}" data-day="${day.key}"${disabled}>
           </label>
         </div>
       </div>
+      ${signed ? `<div class="warning-badges"><span class="badge ok">Signed</span></div>` : ""}
       <div class="day-actions">
-        <button type="button" class="button tiny secondary" data-log-action="day-preset" data-hours="0" data-employee-id="${escapeAttr(employeeId)}" data-day="${day.key}">Off</button>
-        <button type="button" class="button tiny secondary" data-log-action="day-preset" data-hours="5" data-employee-id="${escapeAttr(employeeId)}" data-day="${day.key}">Half day 5h</button>
-        <button type="button" class="button tiny secondary" data-log-action="day-preset" data-hours="10" data-employee-id="${escapeAttr(employeeId)}" data-day="${day.key}">Full day 10h</button>
+        <button type="button" class="button tiny secondary" data-log-action="day-preset" data-hours="0" data-employee-id="${escapeAttr(employeeId)}" data-day="${day.key}"${disabled}>Off</button>
+        <button type="button" class="button tiny secondary" data-log-action="day-preset" data-hours="5" data-employee-id="${escapeAttr(employeeId)}" data-day="${day.key}"${disabled}>Half day 5h</button>
+        <button type="button" class="button tiny secondary" data-log-action="day-preset" data-hours="10" data-employee-id="${escapeAttr(employeeId)}" data-day="${day.key}"${disabled}>Full day 10h</button>
       </div>
       <div class="step-actions">
-        <button type="button" class="button tiny secondary" data-log-action="day-step" data-step="1" data-employee-id="${escapeAttr(employeeId)}" data-day="${day.key}">+1</button>
-        <button type="button" class="button tiny secondary" data-log-action="day-step" data-step="-1" data-employee-id="${escapeAttr(employeeId)}" data-day="${day.key}">-1</button>
+        <button type="button" class="button tiny secondary" data-log-action="day-step" data-step="1" data-employee-id="${escapeAttr(employeeId)}" data-day="${day.key}"${disabled}>+1</button>
+        <button type="button" class="button tiny secondary" data-log-action="day-step" data-step="-1" data-employee-id="${escapeAttr(employeeId)}" data-day="${day.key}"${disabled}>-1</button>
       </div>
       <button type="button" class="button tiny secondary" data-log-action="toggle-note" data-employee-id="${escapeAttr(employeeId)}" data-day="${day.key}">
         ${noteOpen ? "Hide note" : dayEntry.note ? "Edit note" : "Add note"}
       </button>
+      ${signed ? `<button type="button" class="button tiny secondary" data-log-action="reopen-signoff" data-employee-id="${escapeAttr(employeeId)}" data-day="${day.key}">Reopen sign-off</button>` : ""}
       <div class="note-wrap${noteOpen ? " is-open" : ""}">
         ${renderNoteTemplateButtons(employeeId, day.key, "week")}
         <label>
           Note
-          <textarea rows="2" data-note-input data-employee-id="${escapeAttr(employeeId)}" data-day="${day.key}">${escapeHtml(dayEntry.note)}</textarea>
+          <textarea rows="2" data-note-input data-employee-id="${escapeAttr(employeeId)}" data-day="${day.key}"${disabled}>${escapeHtml(dayEntry.note)}</textarea>
         </label>
-        <button type="button" class="button tiny secondary" data-log-action="save-note-template" data-employee-id="${escapeAttr(employeeId)}" data-day="${day.key}">Save note as template</button>
+        <button type="button" class="button tiny secondary" data-log-action="save-note-template" data-employee-id="${escapeAttr(employeeId)}" data-day="${day.key}"${disabled}>Save note as template</button>
       </div>
     </section>
   `;
@@ -1453,7 +1761,7 @@ function renderSummaryView() {
     { label: "Over threshold", value: String(summary.overThreshold.length), detail: `${formatNumber(getThreshold())}h threshold` },
     { label: "Missing entries", value: String(summary.missingEntries.length), detail: "At least one blank day" },
     { label: "Empty weeks", value: String(summary.emptyWeeks.length), detail: "All days empty or 0" },
-    { label: "Signed days", value: `${summary.signedDays}/7`, detail: "Daily review" }
+    { label: "Signed rows", value: `${summary.signedRows}/${summary.totalSignableRows}`, detail: "Worker sign-offs" }
   ];
 
   els.summaryMetrics.replaceChildren(...metrics.map(createMetric));
@@ -1486,7 +1794,8 @@ function renderDayTotals(summary) {
     row.className = "list-item";
     row.innerHTML = `<strong></strong><span></span>`;
     row.querySelector("strong").textContent = `${day.short} ${addDays(selectedWeekStart, index).getDate()}`;
-    row.querySelector("span").textContent = `${formatNumber(summary.dayTotals[day.key])}h${getDayReview(day.key).signed ? " - signed" : ""}`;
+    const signedCount = getDailySignOffStats(day.key).signed;
+    row.querySelector("span").textContent = `${formatNumber(summary.dayTotals[day.key])}h${signedCount ? ` - ${signedCount} signed` : ""}`;
     return row;
   });
   els.dayTotals.replaceChildren(...nodes);
@@ -1666,7 +1975,7 @@ function handleGroupChoiceClick(event) {
 }
 
 function getGroupKey(label) {
-  return String(label || "").trim().toLowerCase() || "no-company-or-group";
+  return String(label || "").trim().toLowerCase() || "no-group";
 }
 
 function isGroupOpen(label) {
@@ -1716,6 +2025,7 @@ function renderPeopleView() {
   }
 
   els.peopleList.replaceChildren(fragment);
+  hydrateImagePreviews(els.peopleList);
 }
 
 function createPeopleGroup(group, archived) {
@@ -1739,7 +2049,7 @@ function createPeopleGroup(group, archived) {
         <summary>
           <span>
             <strong>${escapeHtml(displayEmployeeName(employee))}</strong>
-            <small>${escapeHtml(displayEmployeeGroup(employee))}${employee.role ? ` - ${escapeHtml(employee.role)}` : ""}${archived ? " - Archived" : ""}</small>
+            <small>${escapeHtml(displayEmployeeGroup(employee))}${employee.role ? ` - ${escapeHtml(employee.role)}` : ""}${employee.credentialId ? ` - ${escapeHtml(employee.credentialId)}` : ""}${archived ? " - Archived" : ""}</small>
           </span>
           <span class="summary-meta">${archived ? "Restore" : "Edit"}</span>
         </summary>
@@ -1749,13 +2059,35 @@ function createPeopleGroup(group, archived) {
             <input type="text" value="${escapeAttr(employee.name)}" autocomplete="off" data-person-name data-employee-id="${escapeAttr(employee.id)}">
           </label>
           <label>
-            Company or group
+            Group
             <input type="text" value="${escapeAttr(employee.group || "")}" autocomplete="off" list="employeeGroupOptions" data-person-group data-employee-id="${escapeAttr(employee.id)}">
           </label>
           <label>
-            Role or note
+            Note
             <input type="text" value="${escapeAttr(employee.role || "")}" autocomplete="off" data-person-role data-employee-id="${escapeAttr(employee.id)}">
           </label>
+          <label>
+            Credential
+            <select data-person-credential-type data-employee-id="${escapeAttr(employee.id)}">
+              <option value=""${employee.credentialType ? "" : " selected"}>None</option>
+              ${CREDENTIAL_TYPES.map((type) => `<option value="${escapeAttr(type)}"${employee.credentialType === type ? " selected" : ""}>${escapeHtml(type)}</option>`).join("")}
+            </select>
+          </label>
+          <label>
+            Credential ID
+            <input type="text" value="${escapeAttr(employee.credentialId || "")}" autocomplete="off" data-person-credential-id data-employee-id="${escapeAttr(employee.id)}">
+          </label>
+          <label>
+            Expiry
+            <input type="date" value="${escapeAttr(employee.credentialExpiry || "")}" data-person-credential-expiry data-employee-id="${escapeAttr(employee.id)}">
+          </label>
+          <label class="file-field">
+            Reference ID photo
+            <input type="file" accept="image/*" capture="environment" data-person-reference-photo data-employee-id="${escapeAttr(employee.id)}">
+          </label>
+          <div class="reference-photo-slot">
+            ${employee.referenceImageId ? `<img class="photo-preview reference-preview" data-image-preview="${escapeAttr(employee.referenceImageId)}" alt="Reference ID-card photo">` : `<span class="empty-photo">No reference photo</span>`}
+          </div>
         </div>
         <button type="button" class="button ${archived ? "secondary" : "danger"}" ${archived ? "data-restore-employee" : "data-archive-employee"} data-employee-id="${escapeAttr(employee.id)}">${archived ? "Restore employee" : "Archive employee"}</button>
       `;
@@ -1772,6 +2104,10 @@ function renderSettingsView() {
 function handleLogClick(event) {
   const templateButton = event.target.closest("[data-note-template]");
   if (templateButton) {
+    if (!canEditEmployeeDay(templateButton.dataset.employeeId, templateButton.dataset.day)) {
+      showDailyNotice("This signed row is locked. Reopen sign-off before editing.");
+      return;
+    }
     applyNoteTemplate(templateButton.dataset.employeeId, templateButton.dataset.day, templateButton.dataset.noteTemplate);
     return;
   }
@@ -1835,6 +2171,17 @@ function handleLogClick(event) {
     return;
   }
 
+  if (action === "reopen-signoff") {
+    const employee = state.employees.find((item) => item.id === employeeId);
+    const confirmed = window.confirm(`Reopen sign-off for ${employee ? displayEmployeeName(employee) : "this worker"} on ${dayByKey(button.dataset.day).label}? The signed snapshot stays in history as voided.`);
+    if (!confirmed) return;
+    voidSignOff(employeeId, button.dataset.day);
+    saveState();
+    renderApp();
+    showDailyNotice("Sign-off reopened. Edit the row, then sign again.");
+    return;
+  }
+
   if (action === "toggle-note") {
     toggleNote(employeeId, button.dataset.day);
     return;
@@ -1851,6 +2198,11 @@ function handleLogInput(event) {
     if (target.value.startsWith("-")) target.value = "";
     const employeeId = target.dataset.employeeId;
     const dayKey = target.dataset.day;
+    if (!canEditEmployeeDay(employeeId, dayKey)) {
+      target.value = getEmployeeEntry(employeeId).days[dayKey].hours;
+      showDailyNotice("This signed row is locked. Reopen sign-off before editing.");
+      return;
+    }
     getEmployeeEntry(employeeId).days[dayKey].hours = target.value;
     clearDayReview(dayKey);
     saveState();
@@ -1862,6 +2214,11 @@ function handleLogInput(event) {
   if (target.matches("[data-note-input]")) {
     const employeeId = target.dataset.employeeId;
     const dayKey = target.dataset.day;
+    if (!canEditEmployeeDay(employeeId, dayKey)) {
+      target.value = getEmployeeEntry(employeeId).days[dayKey].note;
+      showDailyNotice("This signed row is locked. Reopen sign-off before editing.");
+      return;
+    }
     getEmployeeEntry(employeeId).days[dayKey].note = target.value;
     clearDayReview(dayKey);
     saveState();
@@ -1885,17 +2242,23 @@ function selectApplyScope(button) {
 }
 
 function applyWeekPattern(employeeId, weekdayHours) {
-  setEmployeeDays(employeeId, DAY_GROUPS.weekdays, weekdayHours);
-  setEmployeeDays(employeeId, DAY_GROUPS.weekend, 0);
+  const first = setEmployeeDays(employeeId, DAY_GROUPS.weekdays, weekdayHours);
+  const second = setEmployeeDays(employeeId, DAY_GROUPS.weekend, 0);
   clearDayReviews(DAY_GROUPS.all);
   expandedEmployeeId = employeeId;
   saveState();
   renderApp();
+  if (first.skipped + second.skipped) showDailyNotice(`${first.skipped + second.skipped} signed day${first.skipped + second.skipped === 1 ? "" : "s"} skipped.`);
 }
 
 function clearEmployeeWeek(employeeId) {
   const entry = getEmployeeEntry(employeeId);
+  let skippedCount = 0;
   DAYS.forEach((day) => {
+    if (!canEditEmployeeDay(employeeId, day.key)) {
+      skippedCount += 1;
+      return;
+    }
     entry.days[day.key] = { hours: "0", note: "" };
     openNotes.delete(getNoteKey(employeeId, day.key));
   });
@@ -1903,6 +2266,7 @@ function clearEmployeeWeek(employeeId) {
   expandedEmployeeId = employeeId;
   saveState();
   renderApp();
+  if (skippedCount) showDailyNotice(`${skippedCount} signed day${skippedCount === 1 ? "" : "s"} skipped.`);
 }
 
 function copyPreviousWeek(employeeId, card) {
@@ -1913,7 +2277,18 @@ function copyPreviousWeek(employeeId, card) {
     return;
   }
 
-  getWeek().entries[employeeId] = normalizeEntry(JSON.parse(JSON.stringify(previousEntry)), false);
+  const nextEntry = normalizeEntry(JSON.parse(JSON.stringify(previousEntry)), false);
+  const currentEntry = getEmployeeEntry(employeeId);
+  let copiedCount = 0;
+  DAYS.forEach((day) => {
+    if (!canEditEmployeeDay(employeeId, day.key)) return;
+    currentEntry.days[day.key] = nextEntry.days[day.key];
+    copiedCount += 1;
+  });
+  if (!copiedCount) {
+    setCardNotice(card, "All days are signed and locked.");
+    return;
+  }
   clearDayReviews(DAY_GROUPS.all);
   expandedEmployeeId = employeeId;
   saveState();
@@ -1932,16 +2307,19 @@ function applySameHours(employeeId, card) {
 
   const selectedScope = card.querySelector("[data-apply-scope][aria-pressed='true']")?.dataset.applyScope || "weekdays";
   const days = DAY_GROUPS[selectedScope] || DAY_GROUPS.weekdays;
-  setEmployeeDays(employeeId, days, parsed.value);
+  const result = setEmployeeDays(employeeId, days, parsed.value);
   clearDayReviews(days);
   expandedEmployeeId = employeeId;
   saveState();
   renderApp();
+  if (result.skipped) showDailyNotice(`${result.skipped} signed day${result.skipped === 1 ? "" : "s"} skipped.`);
 }
 
 function setDayHours(employeeId, dayKey, hours) {
-  const value = Math.max(0, Number(hours) || 0);
-  getEmployeeEntry(employeeId).days[dayKey].hours = formatNumber(value);
+  if (!setEmployeeDayHours(employeeId, dayKey, hours)) {
+    showDailyNotice("This signed row is locked. Reopen sign-off before editing.");
+    return;
+  }
   clearDayReview(dayKey);
   expandedEmployeeId = employeeId;
   saveState();
@@ -1949,6 +2327,10 @@ function setDayHours(employeeId, dayKey, hours) {
 }
 
 function stepDayHours(employeeId, dayKey, step) {
+  if (!canEditEmployeeDay(employeeId, dayKey)) {
+    showDailyNotice("This signed row is locked. Reopen sign-off before editing.");
+    return;
+  }
   const dayEntry = getEmployeeEntry(employeeId).days[dayKey];
   const parsed = parseHours(dayEntry.hours);
   const current = parsed.valid ? parsed.value : 0;
@@ -2093,16 +2475,45 @@ function handleNoteTemplateSettingsClick(event) {
 function setEmployeeDays(employeeId, days, hours) {
   const value = formatNumber(Math.max(0, Number(hours) || 0));
   const entry = getEmployeeEntry(employeeId);
+  let updated = 0;
+  let skipped = 0;
   days.forEach((dayKey) => {
+    if (!canEditEmployeeDay(employeeId, dayKey)) {
+      skipped += 1;
+      return;
+    }
     entry.days[dayKey].hours = value;
+    updated += 1;
   });
+  return { updated, skipped };
 }
 
-function addEmployee(event) {
+function setEmployeeDayHours(employeeId, dayKey, hours) {
+  if (!canEditEmployeeDay(employeeId, dayKey)) return false;
+  const value = Math.max(0, Number(hours) || 0);
+  getEmployeeEntry(employeeId).days[dayKey].hours = formatNumber(value);
+  clearDayReview(dayKey);
+  return true;
+}
+
+function canEditEmployeeDay(employeeId, dayKey) {
+  return !isEmployeeDaySigned(employeeId, dayKey);
+}
+
+async function addEmployee(event) {
   event.preventDefault();
-  const employee = createEmployeeFromFields(els.employeeName.value, els.employeeGroup.value, els.employeeRole.value);
+  const employee = await createEmployeeFromFields({
+    name: els.employeeName.value,
+    group: els.employeeGroup.value,
+    role: els.employeeRole.value,
+    credentialType: els.employeeCredentialType.value,
+    credentialId: els.employeeCredentialId.value,
+    credentialExpiry: els.employeeCredentialExpiry.value,
+    referencePhotoFile: els.employeeReferencePhoto.files?.[0] || null
+  });
   if (!employee) {
     els.employeeName.focus();
+    showDailyNotice("Enter a name or credential ID.");
     return;
   }
 
@@ -2110,11 +2521,20 @@ function addEmployee(event) {
   setActiveTab("today");
 }
 
-function addEmployeeFromDialog(event) {
+async function addEmployeeFromDialog(event) {
   event.preventDefault();
-  const employee = createEmployeeFromFields(els.modalEmployeeName.value, els.modalEmployeeGroup.value, els.modalEmployeeRole.value);
+  const employee = await createEmployeeFromFields({
+    name: els.modalEmployeeName.value,
+    group: els.modalEmployeeGroup.value,
+    role: els.modalEmployeeRole.value,
+    credentialType: els.modalEmployeeCredentialType.value,
+    credentialId: els.modalEmployeeCredentialId.value,
+    credentialExpiry: els.modalEmployeeCredentialExpiry.value,
+    referencePhotoFile: els.modalEmployeeReferencePhoto.files?.[0] || null
+  });
   if (!employee) {
     els.modalEmployeeName.focus();
+    showDailyNotice("Enter a name or credential ID.");
     return;
   }
 
@@ -2123,20 +2543,40 @@ function addEmployeeFromDialog(event) {
   setActiveTab("today");
 }
 
-function createEmployeeFromFields(name, group, role) {
-  const employeeName = String(name || "").trim();
-  if (!employeeName) return null;
+async function createEmployeeFromFields(fields) {
+  const employeeName = String(fields.name || "").trim();
+  const credentialId = String(fields.credentialId || "").trim();
+  if (!employeeName && !credentialId) return null;
 
   const employee = {
     id: createId(),
     name: employeeName,
-    group: String(group || "").trim(),
-    role: String(role || "").trim(),
+    group: String(fields.group || "").trim(),
+    role: String(fields.role || "").trim(),
+    credentialType: normalizeCredentialType(fields.credentialType),
+    credentialId,
+    credentialExpiry: isDateKey(fields.credentialExpiry) ? fields.credentialExpiry : "",
+    referenceImageId: "",
     archivedAt: ""
   };
   state.employees.push(employee);
+  if (fields.referencePhotoFile) {
+    try {
+      const imageRecord = await createImageRecord({
+        kind: "reference-id-card",
+        employeeId: employee.id,
+        weekKey: "",
+        dayKey: "",
+        file: fields.referencePhotoFile
+      });
+      employee.referenceImageId = imageRecord.id;
+    } catch (error) {
+      showDailyNotice("Person added, but the reference photo could not be saved.");
+    }
+  }
   expandedEmployeeId = employee.id;
   quickFill.employeeId = employee.id;
+  saveState();
   return employee;
 }
 
@@ -2176,6 +2616,12 @@ function handlePeopleInput(event) {
   if (target.matches("[data-person-role]")) {
     employee.role = target.value;
   }
+  if (target.matches("[data-person-credential-id]")) {
+    employee.credentialId = target.value;
+  }
+  if (target.matches("[data-person-credential-expiry]")) {
+    employee.credentialExpiry = isDateKey(target.value) ? target.value : "";
+  }
 
   saveState();
   renderGroupOptions();
@@ -2185,6 +2631,38 @@ function handlePeopleInput(event) {
   renderLogEmployeeList();
   renderSummaryView();
   renderPrintReport();
+}
+
+async function handlePeopleChange(event) {
+  const target = event.target;
+  const employeeId = target.dataset.employeeId;
+  const employee = state.employees.find((item) => item.id === employeeId);
+  if (!employee) return;
+
+  if (target.matches("[data-person-credential-type]")) {
+    employee.credentialType = normalizeCredentialType(target.value);
+  }
+
+  if (target.matches("[data-person-reference-photo]")) {
+    const file = target.files?.[0];
+    if (!file) return;
+    try {
+      const imageRecord = await createImageRecord({
+        kind: "reference-id-card",
+        employeeId,
+        weekKey: "",
+        dayKey: "",
+        file
+      });
+      employee.referenceImageId = imageRecord.id;
+      showDailyNotice("Reference ID photo saved.");
+    } catch (error) {
+      showDailyNotice("Could not save that photo. Try a smaller image.");
+    }
+  }
+
+  saveState();
+  renderApp();
 }
 
 function handlePeopleToggle(event) {
@@ -2238,6 +2716,7 @@ function handleThresholdInput() {
 
 function calculateWeekSummary() {
   const dayTotals = Object.fromEntries(DAYS.map((day) => [day.key, 0]));
+  const activeEmployees = getActiveEmployees();
   const employees = getReportEmployees().map((employee) => {
     const analysis = analyzeEmployee(employee.id);
     DAYS.forEach((day) => {
@@ -2254,7 +2733,8 @@ function calculateWeekSummary() {
     warningCount,
     combinedTotal: employees.reduce((sum, item) => sum + item.total, 0),
     activeCount: employees.filter((item) => item.hasLoggedHours).length,
-    signedDays: DAYS.filter((day) => getDayReview(day.key).signed).length,
+    signedRows: DAYS.reduce((count, day) => count + getDailySignOffStats(day.key).signed, 0),
+    totalSignableRows: activeEmployees.length * DAYS.length,
     overThreshold: employees.filter((item) => item.isOverThreshold),
     missingEntries: employees.filter((item) => item.hasMissingDays),
     emptyWeeks: employees.filter((item) => item.isEmptyWeek),
@@ -2320,8 +2800,8 @@ function clearSelectedWeek() {
   showDataNotice("Selected week cleared.");
 }
 
-function clearAllData() {
-  const phrase = window.prompt("Type CLEAR ALL to remove employees, hours, notes, threshold, and saved view settings.");
+async function clearAllData() {
+  const phrase = window.prompt("Type CLEAR ALL to remove employees, hours, notes, sign-offs, photos, threshold, and saved view settings.");
   if (phrase !== "CLEAR ALL") {
     showDataNotice("Clear all cancelled.");
     return;
@@ -2342,6 +2822,7 @@ function clearAllData() {
   dailyPeopleFill.employeeIds.clear();
   openNotes.clear();
   localStorage.removeItem(STORAGE_KEY);
+  await clearImageStore().catch(() => {});
   renderApp();
   markSaved("All data cleared.");
   showDataNotice("All data cleared.");
@@ -2354,12 +2835,19 @@ function exportCsv() {
     "week start date",
     "week end date",
     "employee name",
-    "company/group",
-    "role/note"
+    "group",
+    "note"
   ];
 
   DAYS.forEach((day) => {
-    headers.push(`${day.label} hours`, `${day.label} note`);
+    headers.push(
+      `${day.label} hours`,
+      `${day.label} note`,
+      `${day.label} sign-off status`,
+      `${day.label} signed time`,
+      `${day.label} signed hours`,
+      `${day.label} credential ID`
+    );
   });
 
   headers.push("weekly total", "threshold", "warning status");
@@ -2376,7 +2864,15 @@ function exportCsv() {
     ];
 
     DAYS.forEach((day) => {
-      row.push(entry.days[day.key].hours || "", entry.days[day.key].note || "");
+      const signOff = getActiveSignOff(employee.id, day.key);
+      row.push(
+        entry.days[day.key].hours || "",
+        entry.days[day.key].note || "",
+        signOff ? "signed" : "not signed",
+        signOff?.signedAt || "",
+        signOff?.signedHours || "",
+        signOff?.credentialId || employee.credentialId || ""
+      );
     });
 
     row.push(formatNumber(analysis.total), formatNumber(getThreshold()), analysis.warningStatus);
@@ -2434,11 +2930,221 @@ function renderPrintReport() {
   `;
 }
 
-function exportBackup() {
+async function printDailySignOffSheet() {
+  await renderDailySignOffReport();
+  document.body.dataset.printMode = "daily";
+  window.print();
+}
+
+async function renderDailySignOffReport() {
+  const dateLabel = `${dayByKey(selectedDailyDayKey).label} ${formatShortDate(getSelectedDailyDate())}`;
+  const employees = getDailySignOffReportEmployees();
+  const rows = [];
+
+  for (const employee of employees) {
+    const entry = getEmployeeEntry(employee.id).days[selectedDailyDayKey];
+    const signOff = getActiveSignOff(employee.id, selectedDailyDayKey);
+    const image = signOff?.evidenceImageId ? await getImageRecord(signOff.evidenceImageId).catch(() => null) : null;
+    const credentialText = signOff ? formatCredential(signOff) : formatCredential(employee);
+    rows.push(`
+      <tr>
+        <td><strong>${escapeHtml(displayEmployeeName(employee))}</strong></td>
+        <td>${escapeHtml(employee.group || "")}</td>
+        <td>${escapeHtml(credentialText || "")}</td>
+        <td>${escapeHtml(signOff?.signedHours || (entry.hours === "" ? "0" : entry.hours))}</td>
+        <td>${escapeHtml(signOff?.signedNote || entry.note || "")}</td>
+        <td>${escapeHtml(signOff ? formatSignedDateTime(signOff.signedAt) : "")}</td>
+        <td>${image?.dataUrl ? `<img class="print-photo" src="${escapeAttr(image.dataUrl)}" alt="ID photo">` : ""}</td>
+        <td>${escapeHtml(signOff ? "Signed" : "Not signed")}</td>
+      </tr>
+    `);
+  }
+
+  els.dailySignOffPrintArea.innerHTML = `
+    <h1>Daily Sign-Off Sheet</h1>
+    <div>${escapeHtml(dateLabel)} - ${escapeHtml(getWeekRangeLabel())}</div>
+    <table class="print-table daily-print-table">
+      <thead>
+        <tr>
+          <th>Worker</th>
+          <th>Group</th>
+          <th>Credential</th>
+          <th>Hours</th>
+          <th>Note</th>
+          <th>Signed at</th>
+          <th>ID photo</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>${rows.join("") || `<tr><td colspan="8">No workers</td></tr>`}</tbody>
+    </table>
+  `;
+}
+
+function getDailySignOffReportEmployees() {
+  return state.employees.filter((employee) => {
+    if (!employee.archivedAt) return true;
+    return Boolean(getActiveSignOff(employee.id, selectedDailyDayKey));
+  });
+}
+
+function openImageDb() {
+  return new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) {
+      reject(new Error("IndexedDB unavailable"));
+      return;
+    }
+
+    const request = indexedDB.open(IMAGE_DB_NAME, IMAGE_DB_VERSION);
+    request.addEventListener("upgradeneeded", () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(IMAGE_STORE_NAME)) {
+        const store = db.createObjectStore(IMAGE_STORE_NAME, { keyPath: "id" });
+        store.createIndex("employeeId", "employeeId", { unique: false });
+        store.createIndex("kind", "kind", { unique: false });
+      }
+    });
+    request.addEventListener("success", () => resolve(request.result));
+    request.addEventListener("error", () => reject(request.error || new Error("IndexedDB error")));
+  });
+}
+
+async function withImageStore(mode, callback) {
+  const db = await openImageDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(IMAGE_STORE_NAME, mode);
+    const store = transaction.objectStore(IMAGE_STORE_NAME);
+    let result;
+    transaction.addEventListener("complete", () => {
+      db.close();
+      resolve(result);
+    });
+    transaction.addEventListener("error", () => {
+      db.close();
+      reject(transaction.error || new Error("Image transaction failed"));
+    });
+    try {
+      result = callback(store);
+    } catch (error) {
+      db.close();
+      reject(error);
+    }
+  });
+}
+
+function requestToPromise(request) {
+  return new Promise((resolve, reject) => {
+    request.addEventListener("success", () => resolve(request.result));
+    request.addEventListener("error", () => reject(request.error || new Error("Image request failed")));
+  });
+}
+
+async function saveImageRecord(record) {
+  await withImageStore("readwrite", (store) => store.put(record));
+  return record;
+}
+
+async function getImageRecord(id) {
+  if (!id) return null;
+  return withImageStore("readonly", (store) => requestToPromise(store.get(id)));
+}
+
+async function getAllImageRecords() {
+  return withImageStore("readonly", (store) => requestToPromise(store.getAll()));
+}
+
+async function restoreImageRecords(records) {
+  const validRecords = Array.isArray(records) ? records.map(normalizeImageRecord).filter(Boolean) : [];
+  await withImageStore("readwrite", (store) => {
+    store.clear();
+    validRecords.forEach((record) => store.put(record));
+  });
+}
+
+async function clearImageStore() {
+  await withImageStore("readwrite", (store) => store.clear());
+}
+
+async function createImageRecord({ kind, employeeId, weekKey, dayKey, file }) {
+  const dataUrl = await compressImageFile(file);
+  const record = {
+    id: createId(),
+    kind,
+    employeeId: employeeId || "",
+    weekKey: weekKey || "",
+    dayKey: dayKey || "",
+    createdAt: new Date().toISOString(),
+    mimeType: "image/jpeg",
+    dataUrl
+  };
+  return saveImageRecord(record);
+}
+
+function compressImageFile(file) {
+  return new Promise((resolve, reject) => {
+    if (!file || !file.type?.startsWith("image/")) {
+      reject(new Error("Invalid image"));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      const image = new Image();
+      image.addEventListener("load", () => {
+        const scale = Math.min(1, IMAGE_MAX_SIZE / Math.max(image.width, image.height));
+        const width = Math.max(1, Math.round(image.width * scale));
+        const height = Math.max(1, Math.round(image.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        if (!context) {
+          reject(new Error("Canvas unavailable"));
+          return;
+        }
+        context.drawImage(image, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", IMAGE_QUALITY));
+      });
+      image.addEventListener("error", () => reject(new Error("Invalid image data")));
+      image.src = String(reader.result || "");
+    });
+    reader.addEventListener("error", () => reject(reader.error || new Error("Image read failed")));
+    reader.readAsDataURL(file);
+  });
+}
+
+function normalizeImageRecord(record) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return null;
+  if (typeof record.id !== "string" || !record.id) return null;
+  if (typeof record.dataUrl !== "string" || !record.dataUrl.startsWith("data:image/")) return null;
+  return {
+    id: record.id,
+    kind: typeof record.kind === "string" ? record.kind : "",
+    employeeId: typeof record.employeeId === "string" ? record.employeeId : "",
+    weekKey: typeof record.weekKey === "string" ? record.weekKey : "",
+    dayKey: isDayKey(record.dayKey) ? record.dayKey : "",
+    createdAt: typeof record.createdAt === "string" ? record.createdAt : "",
+    mimeType: typeof record.mimeType === "string" ? record.mimeType : "image/jpeg",
+    dataUrl: record.dataUrl
+  };
+}
+
+function hydrateImagePreviews(container) {
+  if (!container) return;
+  container.querySelectorAll("[data-image-preview]").forEach(async (image) => {
+    const record = await getImageRecord(image.dataset.imagePreview).catch(() => null);
+    if (record?.dataUrl) image.src = record.dataUrl;
+  });
+}
+
+async function exportBackup() {
+  const images = await getAllImageRecords().catch(() => []);
   const backup = {
     schema: STORAGE_KEY,
+    imageSchema: IMAGE_DB_NAME,
     exportedAt: new Date().toISOString(),
-    data: normalizeState(state, false)
+    data: normalizeState(state, false),
+    images
   };
   downloadBlob(JSON.stringify(backup, null, 2), `weekly-hours-backup-${todayKey()}.json`, "application/json");
 }
@@ -2448,7 +3154,7 @@ function importBackup(event) {
   if (!file) return;
 
   const reader = new FileReader();
-  reader.addEventListener("load", () => {
+  reader.addEventListener("load", async () => {
     try {
       const parsed = JSON.parse(String(reader.result || ""));
       const imported = parsed && parsed.data ? parsed.data : parsed;
@@ -2460,6 +3166,12 @@ function importBackup(event) {
       }
 
       state = normalized;
+      let imageRestoreFailed = false;
+      try {
+        await restoreImageRecords(Array.isArray(parsed.images) ? parsed.images : []);
+      } catch (error) {
+        imageRestoreFailed = true;
+      }
       selectedWeekStart = parseDateKey(state.selectedWeekStart) || startOfWeek(new Date());
       activeTab = normalizeTab(state.lastTab);
       selectedDailyDayKey = isDayKey(state.lastDailyDayKey) ? state.lastDailyDayKey : getDefaultDailyDayKey();
@@ -2470,7 +3182,7 @@ function importBackup(event) {
       quickFill.employeeId = getActiveEmployees()[0]?.id || "";
       saveState();
       renderApp();
-      showDataNotice("Backup imported.");
+      showDataNotice(imageRestoreFailed ? "Backup imported, but images could not be restored in this browser." : "Backup imported.");
     } catch (error) {
       showDataNotice("Import failed. The file does not match the expected backup format.");
     } finally {
@@ -2562,11 +3274,19 @@ function normalizeState(input, strict) {
 
 function normalizeEmployee(employee) {
   if (!employee || typeof employee !== "object") return null;
+  const credentialType = normalizeCredentialType(employee.credentialType);
+  const credentialExpiry = typeof employee.credentialExpiry === "string" && isDateKey(employee.credentialExpiry)
+    ? employee.credentialExpiry
+    : "";
   return {
     id: typeof employee.id === "string" && employee.id ? employee.id : createId(),
     name: typeof employee.name === "string" ? employee.name : "",
-    group: typeof employee.group === "string" ? employee.group : typeof employee.company === "string" ? employee.company : "",
+    group: typeof employee.group === "string" ? employee.group : "",
     role: typeof employee.role === "string" ? employee.role : "",
+    credentialType,
+    credentialId: typeof employee.credentialId === "string" ? employee.credentialId : "",
+    credentialExpiry,
+    referenceImageId: typeof employee.referenceImageId === "string" ? employee.referenceImageId : "",
     archivedAt: typeof employee.archivedAt === "string" ? employee.archivedAt : employee.archived ? new Date().toISOString() : ""
   };
 }
@@ -2574,7 +3294,7 @@ function normalizeEmployee(employee) {
 function normalizeWeek(week, strict) {
   if (!week || typeof week !== "object" || Array.isArray(week)) {
     if (strict) throw new Error("Invalid week");
-    return { entries: {} };
+    return { entries: {}, dayReviews: createEmptyDayReviews(), signOffs: {}, signOffHistory: [] };
   }
 
   const entries = {};
@@ -2610,7 +3330,65 @@ function normalizeWeek(week, strict) {
     };
   });
 
-  return { entries, dayReviews };
+  const signOffs = {};
+  const sourceSignOffs = week.signOffs && typeof week.signOffs === "object" && !Array.isArray(week.signOffs)
+    ? week.signOffs
+    : {};
+
+  if (strict && week.signOffs !== undefined && sourceSignOffs !== week.signOffs) {
+    throw new Error("Invalid sign-offs");
+  }
+
+  Object.entries(sourceSignOffs).forEach(([employeeId, employeeSignOffs]) => {
+    if (!employeeSignOffs || typeof employeeSignOffs !== "object" || Array.isArray(employeeSignOffs)) {
+      if (strict) throw new Error("Invalid employee sign-offs");
+      return;
+    }
+    const normalizedEmployeeSignOffs = {};
+    DAYS.forEach((day) => {
+      if (employeeSignOffs[day.key] === undefined) return;
+      const record = normalizeSignOffRecord(employeeSignOffs[day.key], strict);
+      if (record) normalizedEmployeeSignOffs[day.key] = record;
+    });
+    if (Object.keys(normalizedEmployeeSignOffs).length) signOffs[employeeId] = normalizedEmployeeSignOffs;
+  });
+
+  let signOffHistory = [];
+  if (Array.isArray(week.signOffHistory)) {
+    signOffHistory = week.signOffHistory.map((record) => normalizeSignOffRecord(record, strict)).filter(Boolean);
+  } else if (strict && week.signOffHistory !== undefined) {
+    throw new Error("Invalid sign-off history");
+  }
+
+  return { entries, dayReviews, signOffs, signOffHistory };
+}
+
+function normalizeSignOffRecord(record, strict) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) {
+    if (strict) throw new Error("Invalid sign-off record");
+    return null;
+  }
+
+  if (strict && record.status !== undefined && !["signed", "voided"].includes(record.status)) {
+    throw new Error("Invalid sign-off status");
+  }
+
+  return {
+    id: typeof record.id === "string" && record.id ? record.id : createId(),
+    status: record.status === "voided" ? "voided" : "signed",
+    signedAt: typeof record.signedAt === "string" ? record.signedAt : "",
+    voidedAt: typeof record.voidedAt === "string" ? record.voidedAt : "",
+    employeeId: typeof record.employeeId === "string" ? record.employeeId : "",
+    weekKey: typeof record.weekKey === "string" && isDateKey(record.weekKey) ? record.weekKey : "",
+    dayKey: isDayKey(record.dayKey) ? record.dayKey : "",
+    signedHours: record.signedHours === undefined || record.signedHours === null ? "" : String(record.signedHours),
+    signedNote: typeof record.signedNote === "string" ? record.signedNote : "",
+    credentialType: normalizeCredentialType(record.credentialType),
+    credentialId: typeof record.credentialId === "string" ? record.credentialId : "",
+    credentialExpiry: typeof record.credentialExpiry === "string" && isDateKey(record.credentialExpiry) ? record.credentialExpiry : "",
+    referenceImageId: typeof record.referenceImageId === "string" ? record.referenceImageId : "",
+    evidenceImageId: typeof record.evidenceImageId === "string" ? record.evidenceImageId : ""
+  };
 }
 
 function normalizeNoteTemplates(value, strict) {
@@ -2688,7 +3466,7 @@ function ensureCurrentWeekEntries() {
 function getWeek() {
   const weekKey = getWeekKey();
   if (!state.weeks[weekKey]) {
-    state.weeks[weekKey] = { entries: {}, dayReviews: createEmptyDayReviews() };
+    state.weeks[weekKey] = { entries: {}, dayReviews: createEmptyDayReviews(), signOffs: {}, signOffHistory: [] };
   }
   state.weeks[weekKey] = normalizeWeek(state.weeks[weekKey], false);
   return state.weeks[weekKey];
@@ -2708,6 +3486,54 @@ function getDayReview(dayKey) {
     week.dayReviews[dayKey] = { signed: false, signedAt: "" };
   }
   return week.dayReviews[dayKey];
+}
+
+function getActiveSignOff(employeeId, dayKey) {
+  if (!employeeId || !isDayKey(dayKey)) return null;
+  const record = getWeek().signOffs?.[employeeId]?.[dayKey] || null;
+  return record && record.status === "signed" ? record : null;
+}
+
+function setActiveSignOff(employeeId, dayKey, record) {
+  if (!employeeId || !isDayKey(dayKey)) return;
+  const week = getWeek();
+  if (!week.signOffs[employeeId]) week.signOffs[employeeId] = {};
+  week.signOffs[employeeId][dayKey] = {
+    ...record,
+    employeeId,
+    weekKey: getWeekKey(),
+    dayKey
+  };
+}
+
+function voidSignOff(employeeId, dayKey) {
+  const signOff = getActiveSignOff(employeeId, dayKey);
+  if (!signOff) return false;
+  const week = getWeek();
+  if (!Array.isArray(week.signOffHistory)) week.signOffHistory = [];
+  week.signOffHistory.push({
+    ...signOff,
+    status: "voided",
+    voidedAt: new Date().toISOString()
+  });
+  delete week.signOffs[employeeId][dayKey];
+  if (!Object.keys(week.signOffs[employeeId]).length) delete week.signOffs[employeeId];
+  return true;
+}
+
+function isEmployeeDaySigned(employeeId, dayKey) {
+  return Boolean(getActiveSignOff(employeeId, dayKey));
+}
+
+function getDailySignOffStats(dayKey) {
+  const employees = getActiveEmployees();
+  const total = employees.length;
+  const signed = employees.filter((employee) => isEmployeeDaySigned(employee.id, dayKey)).length;
+  return {
+    total,
+    signed,
+    unsigned: Math.max(0, total - signed)
+  };
 }
 
 function clearDayReview(dayKey) {
@@ -2865,19 +3691,45 @@ function formatSignedTime(value) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function formatSignedDateTime(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString([], {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function normalizeCredentialType(value) {
+  const text = String(value || "").trim();
+  return CREDENTIAL_TYPES.includes(text) ? text : "";
+}
+
 function displayEmployeeName(employee) {
   const name = (employee.name || "").trim();
-  return name || "Unnamed employee";
+  const credentialId = (employee.credentialId || "").trim();
+  return name || credentialId || "Unnamed employee";
 }
 
 function displayEmployeeGroup(employee) {
   const group = (employee.group || "").trim();
-  return group || "No company or group";
+  return group || "No group";
 }
 
 function displayEmployeeOptionLabel(employee) {
   const group = (employee.group || "").trim();
   return group ? `${displayEmployeeName(employee)} - ${group}` : displayEmployeeName(employee);
+}
+
+function formatCredential(source) {
+  const parts = [];
+  if (source.credentialType) parts.push(source.credentialType);
+  if (source.credentialId) parts.push(source.credentialId);
+  if (source.credentialExpiry) parts.push(`expires ${source.credentialExpiry}`);
+  return parts.join(" - ");
 }
 
 function dayByKey(key) {

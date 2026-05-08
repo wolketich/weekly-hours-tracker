@@ -4,31 +4,47 @@ A static, fully client-side weekly hours tracker. It uses plain HTML, CSS, and J
 
 ## Daily mobile workflow
 
-Open `index.html` in a browser. The app starts on Today because the fastest daily workflow is:
+Open `index.html` in a browser. The app starts on Today because the fastest workflow is:
 
 1. Pick the date.
 2. Use All Off, All 5h, or All 10h when everyone worked the same pattern.
-3. Use the group Off, 5h, or 10h buttons when one subcontractor or crew has the same day.
-4. Adjust individual people with Off, 5h, 10h, +1, or -1.
-5. Open notes only for the rows that need them.
-6. Sign off the day when it has been reviewed.
+3. Use the group Off, 5h, or 10h buttons when one crew has the same day.
+4. Adjust individual workers with Off, 5h, 10h, +1, or -1.
+5. Open notes only for rows that need them.
+6. Tap Start Sign-Off and sign workers one at a time.
 
-The Today screen shows the selected date, daily progress, and a compact roster. It avoids the large all-week table so a supervisor can fill the day with minimal scrolling. Roster groups are collapsible, which helps keep subcontractor or crew lists short on a phone.
+The Today screen shows the selected date, daily progress, sign-off progress, and a compact collapsible roster. It avoids the large all-week table so a supervisor can fill the day with minimal scrolling.
 
-## Sections
+## Sign-off workflow
 
-- Today: daily entry for the selected date.
-- Week: weekly totals, warnings, CSV export, PDF/print export, and collapsed weekly tools.
-- People: add, edit, archive, and restore employees.
-- Settings: threshold, note templates, backup, restore, and clear tools.
+The sign-off flow is per worker, per day:
 
-On phones, use the sticky bottom navigation. On desktop, the same sections appear in a compact top navigation.
+1. Fill the worker's hours first.
+2. Tap Start Sign-Off.
+3. Review the worker, group, credential details, hours, and note.
+4. Take or choose a fresh ID-card photo.
+5. Tap Sign worker.
 
-## Add employees
+Blank hours cannot be signed. An explicit `0` can be signed. After a worker is signed, that worker's hours and note for the selected day are locked in the normal entry screens.
 
-On a phone, tap `+ Person` to open the add employee sheet. Enter a name, optionally add a company or group, optionally add a role or note, and tap Add person. After a group exists, the add forms show tappable existing-group chips and the People edit fields suggest saved groups, so the same group can be selected instead of typed again.
+To edit a signed row, use Reopen sign-off. The old signed snapshot is kept in history as voided, and the worker must be signed again after edits.
 
-Employees stay available every week. Their hours and daily notes are stored separately for each Monday to Sunday week.
+This is offline recordkeeping evidence, not legal identity verification. The app does not use face recognition, OCR, a backend, or external services.
+
+## Add workers
+
+On a phone, tap `+ Person` to open the add worker sheet. Enter a name or a credential ID. A name is optional when the credential ID is known.
+
+Optional worker fields:
+
+- Group
+- Note
+- Credential type: Safety Pass, Manual Handling, or Other
+- Credential ID
+- Credential expiry date
+- Reference ID-card photo
+
+After a group exists, the add forms show tappable existing-group chips so the same group can be selected instead of typed again.
 
 ## Fast daily entry
 
@@ -37,64 +53,61 @@ Today includes frequent supervisor shortcuts:
 - All Off: sets everyone on the selected date to 0 hours.
 - All 5h: sets everyone on the selected date to 5 hours.
 - All 10h: sets everyone on the selected date to 10 hours.
-- Group Off, 5h, and 10h: sets only that collapsible company/group section for the selected date.
+- Group Off, 5h, and 10h: sets only that collapsible group section for the selected date.
 - Custom or selected people: apply one custom value to everyone or only chosen people.
 - Copy yesterday: copies the previous day's hours and notes into the selected date when previous-day data exists.
-- Sign off day: marks the selected date as reviewed. Editing hours or notes for that day removes the sign-off so it can be reviewed again.
-- Roster tools: search by name, company/group, or role, filter to All, Needs entry, or Entered, and jump to the first missing or invalid row.
-- Collapsible company/group headings: open only the crew or subcontractor you are filling right now.
+- Roster tools: search by name, group, note, or credential, filter to All, Needs entry, or Entered, and jump to the first missing or invalid row.
 
-Each employee row includes:
-
-- A collapsed row summary with name, company/group, status, and current hours.
-- Manual decimal hour input.
-- Off, 5h, and 10h buttons.
-- +1 and -1 buttons. Hours never go below 0.
-- Collapsed note field opened with Add note or Edit note.
-- Note template chips, including saved templates such as Rain delay and Left early.
-- Compact status badges: Missing, Entered, or Invalid.
+Each worker row includes manual decimal input, Off, 5h, 10h, +1, -1, collapsed notes, note templates, and compact status badges.
 
 ## Weekly tools
 
-Open Week to review the core metrics. Daily totals, employee totals, warnings, overtime review, exports, and Week tools are collapsed so the screen stays short on mobile.
+Open Week to review core metrics. Daily totals, worker totals, warnings, overtime review, exports, and Week tools are collapsed so the screen stays short on mobile.
 
 Expand Week tools for less common weekly actions:
 
-- Quick Fill: select one employee, choose a preset or custom hours, choose days, and apply.
+- Quick Fill: select one worker, choose a preset or custom hours, choose days, and apply.
 - Bulk Fill: apply the same hours to all people or selected people across selected days.
-- Employee week panels: open one employee at a time for full-week edits.
+- Worker week panels: open one worker at a time for full-week edits.
 
-Employee week panels include Full Week 10h, Half Week 5h, Clear Week, Copy Previous Week, and Apply Same Hours.
+Signed rows are skipped by fill tools until their sign-off is reopened.
 
-The Overtime review section shows only employees over the weekly threshold, with their total, hours over threshold, and day-by-day breakdown.
+## Reports
 
-## Archive and restore
+Week report:
 
-Use People to archive employees who should no longer appear in the daily roster. Archived employees keep their saved hours and notes, remain in backups, and still appear in reports for weeks where they have data. Open Archived employees in People to restore someone.
+- Go to Week.
+- Expand Export report.
+- Tap PDF / Print.
+- The browser print dialog opens a clean weekly hours table.
 
-## Note templates
+Daily sign-off sheet:
 
-Settings includes saved note templates. Add common notes there, or open a note on a daily row and use Save note as template. Templates appear as one-tap chips whenever a note field is open.
+- Go to Today.
+- Select the date.
+- Tap Print Sign-Off.
+- The print view includes Worker, Group, Credential, Hours, Note, Signed at, ID photo, and Status.
 
-## Week-to-week memory
-
-The selected week, selected day, active section, roster filter, expanded employee, employees, archived employees, employee groups, threshold, daily sign-offs, note templates, hours, and notes are saved in `localStorage` under `weeklyHoursTracker:v1`. Data persists after refreshes on the same browser and device.
-
-If browser storage is empty or unreadable, the app starts with a clean tracker instead of crashing.
+Use the browser print dialog to save either report as PDF.
 
 ## CSV export
 
-Go to Week, expand Export report, and tap CSV. The export includes the selected week only, with week start and end dates, employee details, company/group, daily hours, daily notes, weekly total, threshold, and warning status.
+Go to Week, expand Export report, and tap CSV. The export includes the selected week only, with week start and end dates, worker details, group, daily hours, daily notes, weekly total, threshold, warning status, and per-day sign-off metadata.
 
 CSV values are escaped for commas, quotes, and line breaks. The filename uses `weekly-hours-YYYY-MM-DD.csv`.
 
-## PDF export
-
-Go to Week, expand Export report, and tap PDF / Print. The app uses the browser print dialog with a clean table-only weekly report. Choose Save as PDF in the print dialog to create a PDF.
-
 ## Backup and restore
 
-Go to Settings, then expand Backup and clear data. Export JSON backup downloads the tracker data. Import JSON backup validates the basic structure before replacing the current tracker data in this browser.
+Go to Settings, then expand Backup and clear data.
+
+- Export JSON backup downloads tracker data plus stored image records.
+- Import JSON backup validates the basic structure, replaces the current tracker data, and restores image records.
+- Clear selected week removes that week's hours, notes, and sign-off metadata.
+- Clear all data removes employees, hours, notes, sign-offs, photos, threshold, and saved view settings.
+
+Hours, notes, employees, sign-off metadata, and settings are stored in `localStorage` under `weeklyHoursTracker:v1`. ID-card images are stored in IndexedDB under `weeklyHoursTrackerImages:v1` because photos are too large for localStorage.
+
+Data is stored only in the browser on this device.
 
 ## PWA install and offline use
 
